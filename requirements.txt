@@ -1,0 +1,2 @@
+# StudyOrganizer 依赖清单：一条命令装齐（pip install -r requirements.txt）
+charset-normalizer==3.5.1

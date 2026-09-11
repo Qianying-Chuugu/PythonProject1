@@ -4,11 +4,15 @@
 目前支持 .txt 和 .md，以后 PDF 会在这里加。
 """
 
+from charset_normalizer import from_bytes
+
 
 def _read_plain_text(path):
-    """读出一个纯文本文件的全部文字（.txt 和 .md 都走这里）。"""
-    with open(path, "r", encoding="utf-8") as f:
-        return f.read()
+    """读出一个纯文本文件的全部文字，自动检测编码（.txt 和 .md 都走这里）。"""
+    with open(path, "rb") as f:          # rb：按二进制读，拿到原始字节
+        raw = f.read()
+    match = from_bytes(raw).best()       # 自动检测编码
+    return str(match)                    # 用检测到的编码解码成文字
 
 
 def extract_text(path):
