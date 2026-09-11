@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# 虚拟环境
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+
+# 本地数据（SQLite 数据库、日志）
+*.db
+*.sqlite
+*.sqlite3
+*.log
+data/
+
+# 向量模型缓存（首次联网下载，不进仓库）
+models/
