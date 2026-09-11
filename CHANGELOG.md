@@ -11,6 +11,9 @@
 - 新增根目录 `.gitignore`（排除 `.venv/`、`.idea/`、模型缓存、SQLite 文件等）。
 - 数据模型补充：`files.suggested_*` 与 `file_tags.confidence/status`，
   用于保留系统建议与用户修正（见 DECISIONS D-012）。
+- 核心包骨架 `studyorganizer/` 与 `extract.py`（extract_text 支持 .txt / .md）
+- 文本提取自动检测编码（charset-normalizer），解决 GBK/UTF-8 混用
+- 新增 `tutorial.md`（Python 语法教程）、`NOTES.md`（开发笔记）、`requirements.txt`
 
 ### Changed
 - 移出第一版范围：相似文件检测（含字节哈希 / SimHash / 语义相似三层去重）。
