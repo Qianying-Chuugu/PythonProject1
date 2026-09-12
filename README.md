@@ -50,9 +50,34 @@ AI 课程资料整理与语义检索系统。
 | 测试 | pytest |
 | 接口（第二阶段） | FastAPI |
 
+## 项目结构
+
+```
+studyorganizer/
+├── extract.py    # 文本提取：txt/md/pdf、标题清洗、扫描件判断
+├── classify.py   # 规则分类：讲义/作业/试卷/笔记/实验报告
+└── store.py      # SQLite 存储：建表/存文件/批量导入/查询
+```
+
 ## 运行方式
 
-待补充（实现后完善）。首次运行会联网下载中文向量模型，之后完全离线运行。
+目前还没有界面，核心库可以直接用 Python 调用：
+
+1. 安装依赖：
+   ```bash
+   pip install -r requirements.txt
+   ```
+2. 导入一个文件夹（自动「提取 → 分类 → 存库」）：
+   ```python
+   from studyorganizer import store
+   store.init_db()
+   store.import_folder("你的资料文件夹")
+   ```
+3. 查询：
+   ```python
+   store.list_files()              # 列出所有文件
+   store.search_files("动态规划")   # 按标题关键词搜
+   ```
 
 ## 文档导航
 
