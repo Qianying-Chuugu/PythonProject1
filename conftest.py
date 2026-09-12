@@ -1,0 +1,3 @@
+# pytest 的配置文件。
+# 放在项目根目录，让 pytest 能找到 studyorganizer 包，
+# 这样 tests/ 里的测试文件才能写 from studyorganizer import ...
