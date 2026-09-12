@@ -1,7 +1,7 @@
 import streamlit as st
 from studyorganizer import store
 from studyorganizer.search import search_semantic
-from studyorganizer.plan import generate_plan
+from studyorganizer.plan import generate_plan, export_report
 
 st.title("📚 StudyOrganizer 课程资料整理")
 
@@ -70,5 +70,11 @@ if st.session_state.get("show_plan"):          # 只有点过生成才显示
                     store.set_plan_status(item_id, "rejected")
                     st.rerun()
             st.divider()
+        if st.button("📄 导出整理报告"):
+            n = export_report()
+            if n:
+                st.success(f"已导出 {n} 条建议到「整理方案.md」")
+            else:
+                st.warning("还没有已确认的建议，先点「确认」")
     else:
         st.info("还没有整理方案")
