@@ -19,7 +19,7 @@
 
 ### 文本提取
 - [x] TXT / Markdown 提取（含编码探测 charset-normalizer）
-- [ ] PDF 提取（PyMuPDF）
+- [x] PDF 提取（PyMuPDF）
 - [ ] 标题提取与文件名清洗
 - [ ] 扫描件（无文本层 PDF）识别与提示
 

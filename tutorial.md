@@ -174,3 +174,49 @@ print(scores.get("小强", 0))   # 没有"小强" → 0
 - `字典[键] = 值` 存，`字典[键]` 取（键不存在直接取会报错）。
 - `for 键, 值 in 字典.items():` 遍历。
 - `键 in 字典` 判断有没有这个键；`字典.get(键, 默认值)` 安全取。
+
+## 第七课：模块和包（import）
+
+```python
+# 模块 = 一个 .py 文件；包 = 一个文件夹 + __init__.py
+
+from studyorganizer.extract import extract_text   # 从包里拿函数
+
+text = extract_text("practice/讲义1.txt")
+print(len(text))
+```
+
+**要点**
+- 一个 `.py` 文件 = 模块（module），里面装函数。
+- 一个文件夹 + `__init__.py` = 包（package），里面装模块。
+- 类比：包 = 抽屉，模块 = 抽屉里的文件。
+- `from 包.模块 import 函数`：把别的文件的函数拿来用。
+- 好处：代码按职责分文件放，不堆在一个文件里。
+
+## 第八课：常用字符串方法
+
+```python
+import os
+
+os.path.basename("practice/名字.pdf")   # → "名字.pdf"（去掉路径）
+os.path.splitext("名字.pdf")             # → ("名字", ".pdf")（拆出扩展名）
+
+"abcabc".replace("b", "X")               # → "aXcaXc"（替换所有）
+
+"a  b  c".split()                        # → ["a", "b", "c"]（按空格切）
+"-".join(["a", "b", "c"])                # → "a-b-c"（用 - 拼起来）
+```
+
+**要点**
+- `basename` / `splitext` 处理文件名路径。
+- `replace(旧, 新)` 替换；`split()` 切成列表；`join(列表)` 拼成字符串。
+- `" ".join(x.split())` 是经典"压掉多余空格"套路。
+
+## 附：项目用到的两个第三方库
+
+| 库 | 用途 | 导入 |
+| --- | --- | --- |
+| charset-normalizer | 自动检测文件编码（解决 GBK/UTF-8） | `from charset_normalizer import from_bytes` |
+| pymupdf | 读取 PDF 文字（旧名 fitz） | `import pymupdf` |
+
+> 详细用法见 `studyorganizer/extract.py` 和 `NOTES.md`。
