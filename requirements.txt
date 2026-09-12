@@ -1,3 +1,6 @@
 # StudyOrganizer 依赖清单：一条命令装齐（pip install -r requirements.txt）
 charset-normalizer==3.5.1
 pymupdf==1.28.2
+streamlit==1.63.0
+sentence-transformers==6.0.1
+scikit-learn==1.9.1

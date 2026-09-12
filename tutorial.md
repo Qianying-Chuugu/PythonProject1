@@ -212,11 +212,48 @@ os.path.splitext("名字.pdf")             # → ("名字", ".pdf")（拆出扩�
 - `replace(旧, 新)` 替换；`split()` 切成列表；`join(列表)` 拼成字符串。
 - `" ".join(x.split())` 是经典"压掉多余空格"套路。
 
-## 附：项目用到的两个第三方库
+## 第九课：排序、切片、拉链、lambda、列表推导式
+
+```python
+# 1. range：生成 0 到 n-1 的一串数
+for i in range(3):
+    print(i)                       # 0 1 2
+
+# 2. 切片：取列表的一部分
+nums = [10, 20, 30, 40, 50]
+nums[:2]                           # → [10, 20]（前 2 个）
+nums[1:3]                          # → [20, 30]（下标 1 到 2）
+
+# 3. zip：两个列表一一配对
+list(zip(["a", "b"], [1, 2]))      # → [("a", 1), ("b", 2)]
+
+# 4. sort + key：按指定标准排序
+pairs = [("作业", 0.6), ("讲义", 0.8), ("笔记", 0.5)]
+pairs.sort(key=lambda p: p[1], reverse=True)
+# → [("讲义", 0.8), ("作业", 0.6), ("笔记", 0.5)]  按分数从高到低
+
+# 5. round：四舍五入
+round(3.14159, 2)                  # → 3.14
+
+# 6. 列表推导式：一行的 for 循环
+[x * 2 for x in [1, 2, 3]]         # → [2, 4, 6]
+```
+
+**要点**
+- `range(n)`：0 到 n-1，常配合 `for i in range(len(列表))` 遍历下标。
+- 切片 `列表[开始:结束]`：取一段；`[:k]` 是前 k 个。
+- `zip(a, b)`：两个列表一一配对。
+- `sort(key=函数, reverse=True)`：按 `key` 标准排序，`reverse=True` 是降序。
+- `lambda 参数: 表达式`：`def` 的缩写，一次性小函数（`lambda p: p[1]` 即"取 p 的第 1 个元素"）。
+- 列表推导式 `[表达式 for 变量 in 列表]`：一行生成新列表。
+
+## 附：项目用到的第三方库
 
 | 库 | 用途 | 导入 |
 | --- | --- | --- |
 | charset-normalizer | 自动检测文件编码（解决 GBK/UTF-8） | `from charset_normalizer import from_bytes` |
 | pymupdf | 读取 PDF 文字（旧名 fitz） | `import pymupdf` |
+| sentence-transformers | 文字变向量，做语义检索 | `from sentence_transformers import SentenceTransformer` |
+| streamlit | 快速搭网页界面 | `import streamlit as st` |
 
-> 详细用法见 `studyorganizer/extract.py` 和 `NOTES.md`。
+> 详细用法见 `studyorganizer/` 各模块和 `NOTES.md`。

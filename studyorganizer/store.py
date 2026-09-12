@@ -42,9 +42,9 @@ def save_file(info, db_path=_DB_PATH):
 
 
 def list_files(db_path=_DB_PATH):
-    """返回数据库里所有文件的 (id, path, title)。"""
+    """返回数据库里所有文件的 (id, path, title, doc_type)。"""
     conn = sqlite3.connect(db_path)
-    rows = conn.execute("SELECT id, path, title FROM files").fetchall()
+    rows = conn.execute("SELECT id, path, title, doc_type FROM files").fetchall()
     conn.close()
     return rows
 
@@ -67,6 +67,14 @@ def search_files(keyword, db_path=_DB_PATH):
     """返回标题里包含 keyword 的所有文件 (id, path, title)。"""
     conn = sqlite3.connect(db_path)
     rows = conn.execute("SELECT id, path, title FROM files WHERE title LIKE ?",(f"%{keyword}%",)).fetchall()
+    conn.close()
+    return rows
+
+
+def list_file_texts(db_path=_DB_PATH):
+    """返回所有文件的 (id, title, text)，供语义检索取正文用。"""
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute("SELECT id, title, text FROM files").fetchall()
     conn.close()
     return rows
 
