@@ -24,3 +24,21 @@
 - 所以顺序是「先读字节 → 自动检测 → 再解码」。
 
 **相关代码**：`studyorganizer/extract.py` 里的 `_read_plain_text()`
+
+## 2. 单元素元组要加逗号（sqlite 报 "Incorrect number of bindings"）
+
+**遇到的问题**
+- 用 sqlite3 执行带 `?` 占位符的 SQL 时，报错：
+  `sqlite3.ProgrammingError: Incorrect number of bindings supplied. The current statement uses 1, and there are 4 supplied.`
+
+**根本原因**
+- 写的是 `(f"%{keyword}%")`，括号里只有一个元素且没加逗号，Python 直接把它当成字符串本身，而不是元组。
+- sqlite3 拿到字符串 `"%讲义%"`，把它当成 4 个字符（`%`、`讲`、`义`、`%`），于是「1 个占位符对上了 4 个值」。
+
+**解决方法**
+- 单元素元组必须加逗号：`(f"%{keyword}%",)`。
+
+**核心道理**
+- `(x)` 就是 `x`，`(x,)` 才是元组。括号里只有一个元素时，**逗号决定它是不是元组**。
+
+**相关代码**：`test.py` 里的 `search_files()`（`SELECT ... WHERE title LIKE ?`）
