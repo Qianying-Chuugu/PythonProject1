@@ -22,21 +22,21 @@ AI 课程资料整理与语义检索系统。
 ## 核心流程
 
 ```
-导入资料 → 提取文本 → 自动分类和生成标签 → 建立搜索索引
-        → 输入自然语言 → 返回相关文件及匹配原因
+导入资料 → 提取文本 → 判断资料类型 → 存库
+        → 关键词/语义检索 → 聚类 → 生成整理方案 → 用户确认
 ```
 
 ## 第一版功能
 
 - 支持 PDF、TXT、Markdown 文件
 - 自动提取标题、正文和文件信息
-- 半自动课程分类（系统给候选建议，用户确认）
 - 自动判断资料类型：讲义 / 作业 / 试卷 / 笔记 / 实验报告
-- 关键词搜索 + 语义搜索
-- 用户可修改错误标签（并沉淀为后续 ML 的训练数据）
+- 标题关键词搜索 + 语义搜索（Sentence Transformers）
+- 内容相近的文件自动聚类
+- 生成整理方案（归并建议），用户确认后可导出报告
 - SQLite 持久化
-- Streamlit 简单界面
-- **只读导入 + 输出建议方案**：不自动移动/删除原文件，用户确认后再操作
+- Streamlit 界面
+- **只读导入 + 建议方案**：不自动移动/删除原文件，用户确认后再操作
 
 ## 技术栈
 
@@ -56,28 +56,31 @@ AI 课程资料整理与语义检索系统。
 studyorganizer/
 ├── extract.py    # 文本提取：txt/md/pdf、标题清洗、扫描件判断
 ├── classify.py   # 规则分类：讲义/作业/试卷/笔记/实验报告
-└── store.py      # SQLite 存储：建表/存文件/批量导入/查询
+├── store.py      # SQLite 存储：建表/存文件/批量导入/查询/整理方案表
+├── search.py     # 语义检索 + 模型加载
+├── cluster.py    # 层次聚类：把内容相近的文件归组
+└── plan.py       # 整理方案：生成归并建议、确认、导出报告
 ```
 
 ## 运行方式
 
-目前还没有界面，核心库可以直接用 Python 调用：
+### 用界面（推荐）
 
-1. 安装依赖：
-   ```bash
-   pip install -r requirements.txt
-   ```
-2. 导入一个文件夹（自动「提取 → 分类 → 存库」）：
-   ```python
-   from studyorganizer import store
-   store.init_db()
-   store.import_folder("你的资料文件夹")
-   ```
-3. 查询：
-   ```python
-   store.list_files()              # 列出所有文件
-   store.search_files("动态规划")   # 按标题关键词搜
-   ```
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+浏览器会自动打开，可以导入文件夹、浏览文件、搜索、生成并确认整理方案。
+
+### 只用核心库（命令行）
+
+```python
+from studyorganizer import store
+store.init_db()
+store.import_folder("你的资料文件夹")   # 自动「提取 → 分类 → 存库」
+store.search_files("动态规划")          # 按标题关键词搜
+```
 
 ## 文档导航
 

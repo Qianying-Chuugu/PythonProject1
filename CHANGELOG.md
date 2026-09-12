@@ -14,6 +14,11 @@
 - 核心包骨架 `studyorganizer/` 与 `extract.py`（extract_text 支持 .txt / .md）
 - 文本提取自动检测编码（charset-normalizer），解决 GBK/UTF-8 混用
 - 新增 `tutorial.md`（Python 语法教程）、`NOTES.md`（开发笔记）、`requirements.txt`
+- 新增 `search.py`：语义检索（sentence-transformers 中文模型）
+- 新增 `cluster.py`：层次聚类，把内容相近的文件归组
+- 新增 `plan.py`：生成 / 确认 / 导出整理方案
+- 新增 `app.py`：Streamlit 界面（导入 / 浏览 / 搜索 / 整理方案）
+- 新增 `tests/`：pytest 覆盖 extract / classify / store
 
 ### Changed
 - 移出第一版范围：相似文件检测（含字节哈希 / SimHash / 语义相似三层去重）。

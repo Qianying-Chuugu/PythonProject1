@@ -8,46 +8,46 @@
 
 ```
 app.py            # Streamlit 入口（薄，只做展示与交互）
-ui/               # 界面组件（页面、表单）
   └── 调用 ↓
 studyorganizer/   # 核心包（纯逻辑，可独立测试）
-  extract/ classify/ embed/ search/ cluster/ plan/ store/
+  extract/ classify/ store/ search/ cluster/ plan/
 ```
-
-> 命名注意：入口文件是 `app.py`，界面组件目录是 `ui/`，两者不重名，避免 `app.py` 与 `app/` 混淆。
 
 ## 模块划分
 
 | 模块 | 职责 |
 | --- | --- |
 | extract | 文本 / 标题 / 元信息提取（pdf / txt / md） |
-| classify | 课程候选建议 + 类型分类（统一接口） |
-| embed | 文档级 / 段落级向量化与缓存 |
-| search | 三种检索器 + 混合（统一接口） |
-| cluster | 课程内聚类 |
-| plan | 生成 / 确认整理方案 |
-| store | SQLite 读写 |
+| classify | 规则分类：判断资料类型 |
+| store | SQLite 读写（files 表 + plan_items 表） |
+| search | 语义检索 + 模型加载（含向量化） |
+| cluster | 层次聚类：内容相近的文件归组 |
+| plan | 生成 / 确认 / 导出整理方案 |
 
 ## 数据流
 
 ```
 导入文件
   → extract   提取标题/正文/元信息
-  → classify  给类型标签 + 课程候选建议（用户确认）
-  → embed     生成文档级向量（聚类用）+ 段落级向量（搜索用）
-  → cluster   找相近分组
-  → plan      生成建议方案（重命名/归并/打标签）
-  → 用户确认/修改 → 写回 store
+  → classify  判断资料类型
+  → store     存入 files 表
 
-搜索：
+检索：
   自然语言 query
-  → 三个 Retriever 并行打分（文件名 / 正文关键词 / 语义）
-  → HybridRetriever 加权合并 → 返回 Hit（含匹配原因）
+  → search    语义向量检索（或标题关键词）
+
+聚类与整理：
+  → cluster   内容相近的文件归组
+  → plan      生成归并建议 → 用户确认 → 导出报告
 ```
 
 ## 核心抽象：统一接口
 
-三个地方刻意抽象成「统一接口 + 多实现」，便于替换与扩展：
+> 注意：以下「统一接口」目前**尚未实现**，是后续设计。
+> v0.1 用的是简单函数（classify_type / search_semantic / cluster_files），
+> 还没抽象成接口。留待 v0.2 或后续重构。
+
+三个地方计划抽象成「统一接口 + 多实现」，便于替换与扩展：
 
 ```python
 # 1. 类型分类器（v1 规则打底，后续 ML 作为第二个实现）
@@ -97,6 +97,9 @@ class Hit:
 固定随机种子；向量模型下载后缓存到固定路径，首次联网、之后离线可用。
 
 ## 数据模型（SQLite 草案）
+
+> 注意：下面是**完整设计草案**。v0.1 只实现了 `files` 和 `plan_items` 两张表（且字段有简化），
+> 其余（courses / tags / file_tags / chunks / suggested_* 等）是后续设计，尚未实现。
 
 ```sql
 -- 课程
@@ -151,12 +154,10 @@ CREATE TABLE chunks (
 -- 整理方案（先建议、后确认、再执行）
 CREATE TABLE plan_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    file_id INTEGER REFERENCES files(id),
-    action TEXT NOT NULL,                -- rename / move / tag
-    target TEXT,                         -- 目标名 / 路径 / 标签
-    reason TEXT,                         -- 匹配原因
-    status TEXT NOT NULL DEFAULT 'pending',  -- pending/confirmed/rejected/applied
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    action TEXT NOT NULL,                -- 归并 等
+    files TEXT NOT NULL,                 -- 建议归并的文件标题（顿号连接）
+    reason TEXT,                         -- 为什么
+    status TEXT NOT NULL DEFAULT 'pending'  -- pending/confirmed/rejected
 );
 ```
 
