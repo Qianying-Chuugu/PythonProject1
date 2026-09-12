@@ -1,6 +1,7 @@
 import streamlit as st
 from studyorganizer import store
 from studyorganizer.search import search_semantic
+from studyorganizer.plan import generate_plan
 
 st.title("📚 StudyOrganizer 课程资料整理")
 
@@ -46,3 +47,28 @@ if sem_query:
             st.write(f"• {title}　（相关度 {score}）")
     else:
         st.warning("库里没有文件，先去左边导入")
+
+st.header("整理方案")
+
+if st.button("生成整理方案"):
+    plan = generate_plan()
+    st.success(f"生成了 {len(plan)} 条建议")
+    st.session_state["show_plan"] = True      # 记住"本会话点过生成"
+
+if st.session_state.get("show_plan"):          # 只有点过生成才显示
+    items = store.list_plan_items()
+    if items:
+        for item_id, action, files, reason, status in items:
+            st.markdown(f"**{action}**（{status}）：{files}")
+            st.caption(reason)
+            if status == "pending":
+                c1, c2 = st.columns(2)
+                if c1.button("✓ 确认", key=f"ok_{item_id}"):
+                    store.set_plan_status(item_id, "confirmed")
+                    st.rerun()
+                if c2.button("✗ 拒绝", key=f"no_{item_id}"):
+                    store.set_plan_status(item_id, "rejected")
+                    st.rerun()
+            st.divider()
+    else:
+        st.info("还没有整理方案")

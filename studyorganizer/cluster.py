@@ -5,14 +5,13 @@
 """
 
 from sklearn.cluster import AgglomerativeClustering
-
 from studyorganizer import store
 from studyorganizer.search import _get_model   # 复用语义检索的模型
 
 
 def cluster_files(threshold=0.3):
-    """把数据库里的文件按内容相似度聚成若干组。
-
+    """
+    把数据库里的文件按内容相似度聚成若干组。
     参数 threshold：距离阈值，越大合并越狠、堆越少（余弦距离 0~1）。
     返回 {堆号: [标题列表], ...}
     """

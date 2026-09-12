@@ -23,6 +23,15 @@ def init_db(db_path=_DB_PATH):  #建表SQL
             is_scanned INTEGER DEFAULT 0
         )
     """)  #每行唯一一个编号,路径唯一,标题,正文,是否扫描件(默认0)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS plan_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            action TEXT NOT NULL,
+            files TEXT NOT NULL,
+            reason TEXT,
+            status TEXT NOT NULL DEFAULT 'pending'
+        )
+    """)  #整理方案：一行一条建议，files 存建议归并的文件标题
     conn.commit()  #保存
     conn.close()  #关闭
 
@@ -77,6 +86,41 @@ def list_file_texts(db_path=_DB_PATH):
     rows = conn.execute("SELECT id, title, text FROM files").fetchall()
     conn.close()
     return rows
+
+
+def add_plan_item(action, files, reason, db_path=_DB_PATH):
+    """往整理方案里加一条建议。"""
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "INSERT INTO plan_items (action, files, reason) VALUES (?, ?, ?)",
+        (action, files, reason),
+    )
+    conn.commit()
+    conn.close()
+
+
+def clear_plan_items(db_path=_DB_PATH):
+    """清空整理方案（重新生成前先清掉旧的，避免重复）。"""
+    conn = sqlite3.connect(db_path)
+    conn.execute("DELETE FROM plan_items")
+    conn.commit()
+    conn.close()
+
+
+def list_plan_items(db_path=_DB_PATH):
+    """返回整理方案的所有建议 (id, action, files, reason, status)。"""
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute("SELECT id, action, files, reason, status FROM plan_items").fetchall()
+    conn.close()
+    return rows
+
+
+def set_plan_status(item_id, status, db_path=_DB_PATH):
+    """把某条建议的状态改成 confirmed / rejected。"""
+    conn = sqlite3.connect(db_path)
+    conn.execute("UPDATE plan_items SET status = ? WHERE id = ?", (status, item_id))
+    conn.commit()
+    conn.close()
 
 
 
