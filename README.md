@@ -43,6 +43,8 @@
 - **三种检索 + 混合检索**：文件名关键词 / 正文关键词（TF-IDF）/ 语义向量，结果带「匹配原因」
 - **语义检索按段落比**：切段 → 每段存一个向量 → 命中后告诉你**是哪一段**、并把那一段贴出来
 - 向量算一次就存进库里，正文变了或换了模型才重算（不会每次检索都现算）
+- **标签系统**：导入时按资料类型自动打标签，界面上可以改、可以手输新的，
+  也能按标签筛选文件（勾中任意一个就显示）
 - 内容相近的文件自动聚类 → 生成整理方案 → 用户确认 → 导出报告
 - Streamlit 界面 + SQLite 持久化
 - 向量模型是在示例语料上**实测选出来**的，不是拍脑袋：`BAAI/bge-small-zh-v1.5`
@@ -60,7 +62,7 @@
 **还没做**（正在做的，都在 [ROADMAP.md](ROADMAP.md) 里）：
 
 - 统一接口抽象（`TypeClassifier` / `Retriever`，为将来换实现做准备）
-- BM25、标签系统、文件重命名建议
+- BM25、文件重命名建议
 - 真实模型的端到端检索测试没进默认测试集（要下载模型，跑起来太慢）——
   改成了手动跑 `tools/benchmark.py`；加 `--check` 会断言"21 条查询的标准答案
   必须都排第一"，不过就以非 0 退出。见 [DESIGN.md](DESIGN.md)「可复现性」
@@ -170,7 +172,7 @@ StudyOrganizer-Python/
 │   ├── chunk.py            #   把正文切成一段一段（自然段 + 超长段二次切）
 │   ├── classify.py         #   规则分类：讲义 / 作业 / 试卷 / 笔记 / 实验报告
 │   ├── course.py           #   从文件名猜课程归属（半自动）
-│   ├── store.py            #   SQLite 存储：建表 / 存取 / 查询 / 整理方案
+│   ├── store.py            #   SQLite 存储：建表 / 存取 / 查询 / 整理方案 / 标签
 │   ├── index.py            #   建索引：算向量存库 + 判断哪些行过期要重算
 │   ├── search.py           #   三种检索（标题关键词 / TF-IDF / 语义）+ 混合检索
 │   ├── cluster.py          #   层次聚类：把内容相近的文件归组
@@ -247,6 +249,8 @@ gets written down right away.
   own vector, and a hit tells you **which chunk** matched and shows you that chunk
 - Embeddings are computed once and stored; they're only recomputed when the text changes
   or you switch models (not on every search)
+- **Tags**: a tag is added automatically from the document type on import; you can edit it,
+  type new ones, and filter the file list by tag (union — pick any tag to see those files)
 - Cluster similar files → suggest a cleanup plan → you confirm → export a report
 - Streamlit UI + SQLite storage
 - The embedding model was **picked by measurement**, not by vibes: `BAAI/bge-small-zh-v1.5`
@@ -267,7 +271,7 @@ gets written down right away.
 **Not done yet** (tracked in [ROADMAP.md](ROADMAP.md)):
 
 - Unified interfaces (`TypeClassifier` / `Retriever`) to make implementations swappable
-- BM25, a tag system, rename suggestions
+- BM25, rename suggestions
 - Real-model end-to-end retrieval tests aren't in the default suite (they'd have to
   download the model, so they're too slow) — they're a manual run via `tools/benchmark.py`,
   and `--check` asserts that all 21 labeled answers rank first, exiting non-zero if not

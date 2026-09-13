@@ -57,6 +57,35 @@ def init_db(db_path=_DB_PATH):  #建表SQL
     #      seq 是段落在原文里的顺序，从 1 开始（这个号是给人看的「第几段」）；
     #      UNIQUE(file_id, seq) 保证同一文件里不会有重复段号。
     #      后两列和 files 表完全对称，过期判断用的是同一套办法（见 index.py）。
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS tags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE
+        )
+    """)  #标签表：一个标签名一行，name 唯一（同一个标签名只存一条）
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS file_tags (
+            file_id INTEGER NOT NULL,
+            tag_id  INTEGER NOT NULL,
+            source TEXT NOT NULL,
+            confidence REAL,
+            status TEXT NOT NULL DEFAULT 'active',
+            PRIMARY KEY (file_id, tag_id)
+        )
+    """)  #文件↔标签：多对多，所以单独一张表（一个文件多个标签、一个标签多个文件）
+    #      file_id / tag_id 指向 files.id / tags.id，和 files.course_id 一样只记关系、
+    #      不写 REFERENCES 约束（SQLite 外键默认不生效，写了也只是个注释，见 DESIGN.md）；
+    #      PRIMARY KEY (file_id, tag_id) 保证同一对「文件+标签」只会有一行——
+    #      自动标签能不能被重新导入激活，靠的就是这个主键 + INSERT OR IGNORE（见 add_auto_tag）；
+    #      source 记这条是谁加的：'auto'（分类器判的）| 'user'（用户手输的）；
+    #      confidence 是自动标签的置信度，**本轮恒为 NULL**——classify.py 的
+    #      classify_type 只给一个类型名、不给分数，这里不假装算过。
+    #      列先留着（D-012 和 DESIGN 草案都点名了它），等分类器真出分数了再填；
+    #      status 记这条还有没有效：'active' | 'rejected'（用户去掉的自动标签把这行
+    #      留着、只翻成 rejected，不删——D-012 要求拒绝留痕，D-006 要靠它沉淀训练数据）。
+    # 这两张表**不需要像 files 那样 ALTER 补列**：上面就是 CREATE TABLE IF NOT EXISTS，
+    # 本身就是幂等的，老库下次 init_db() 自动建上（跟当初加 chunks 走的是同一条路）。
+    # files 当初要用 ALTER，是因为它加的是**列**——表已经存在时 CREATE 不会加列。
     # 给老库补上后加的列。注意：表已经存在时，CREATE TABLE IF NOT EXISTS 不会加列，
     # 所以老数据库（studyorganizer.db）得用 ALTER TABLE 补，否则会报"no such column"。
     existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(files)")}  # 现在有哪些列
@@ -77,6 +106,8 @@ def save_file(info, db_path=_DB_PATH):
     把 extract_file 返回的字典存进数据库。
     info 里要有：path、title、text
     （doc_type、is_scanned、suggested_course_id 可选，没有就存 NULL）
+    返回这个文件在库里的 id（新建的是新 id，已存在的还是原来那个 id）——
+    导入时要拿它去挂自动标签，所以必须有。
     """
     conn = sqlite3.connect(db_path)
 
@@ -115,8 +146,13 @@ def save_file(info, db_path=_DB_PATH):
         # 这样「换个切法重来」也不需要写迁移代码，删掉重导即可。
         conn.execute("DELETE FROM chunks WHERE file_id = ?", (old_id,))
 
+    # 再按 path 查一次拿 id。不图省事用 cur.lastrowid：走 DO UPDATE 分支时
+    # lastrowid 是"更新那一行"的 rowid，虽然碰巧也对，但查一次是明确的、不受
+    # 插入/更新分支影响，读代码的人不用去想 SQLite 这种情况下 lastrowid 到底是啥。
+    file_id = conn.execute("SELECT id FROM files WHERE path = ?", (info["path"],)).fetchone()[0]
     conn.commit()
     conn.close()
+    return file_id
 
 
 def get_or_create_course(name, db_path=_DB_PATH):
@@ -175,6 +211,147 @@ def list_files_with_course(db_path=_DB_PATH):
     return rows
 
 
+def _get_or_create_tag(conn, name):
+    """在**已经开好的连接**上按标签名查 id，没有就新建，返回 tag id。
+
+    为什么不直接调下面那个 get_or_create_tag：那个会自己再开一条连接。
+    SQLite 同一时刻只允许一条连接写库，set_file_tags 里正开着事务，
+    再开一条去写同一张表就会报 "database is locked"。
+    所以"在一段事务里反复查/建标签"要用这个版本。
+    """
+    row = conn.execute("SELECT id FROM tags WHERE name = ?", (name,)).fetchone()
+    if row:
+        return row[0]
+    cur = conn.execute("INSERT INTO tags (name) VALUES (?)", (name,))
+    return cur.lastrowid      # 刚插入那行的 id
+
+
+def get_or_create_tag(name, db_path=_DB_PATH):
+    """按标签名查标签 id；没有就新建一条。返回 tag id。（和 get_or_create_course 对称）"""
+    conn = sqlite3.connect(db_path)
+    tag_id = _get_or_create_tag(conn, name)
+    conn.commit()
+    conn.close()
+    return tag_id
+
+
+def list_tags(db_path=_DB_PATH):
+    """返回所有标签 (id, name)，按名字排序。（和 list_courses 对称）"""
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute("SELECT id, name FROM tags ORDER BY name").fetchall()
+    conn.close()
+    return rows
+
+
+def list_file_tags(db_path=_DB_PATH):
+    """
+    返回所有「文件↔标签」关系 (文件id, 标签名, 来源, 状态)，按文件 id 排序。
+    两个 LEFT JOIN 都不用（这里就是 INNER JOIN）：没关系就没行，正合适。
+    界面拿它一次性拼出 {文件id: [(标签名, 来源, 状态), ...]}，只查一次库。
+    """
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute(
+        "SELECT ft.file_id, t.name, ft.source, ft.status"
+        " FROM file_tags ft JOIN tags t ON t.id = ft.tag_id"
+        " ORDER BY ft.file_id"
+    ).fetchall()
+    conn.close()
+    return rows
+
+
+def set_file_tags(file_id, tag_names, db_path=_DB_PATH):
+    """
+    用户点「保存」时调用：把这个文件的标签对齐成 tag_names（用户最后看到的那份）。
+
+    这是全项目唯一一处同时碰「三种标签状态」的地方，三种情况分开处理：
+      · 选中的名字：没有这个标签就建；这个文件还没有它 → 新记一条 source='user'。
+        已经有（比如自动标签，或者上次拒掉过的）→ **只把 status 改回 'active'，
+        不动 source**——它是当初系统判的还是用户加的，要留痕（D-012）。
+      · 原来有效、这次没选中的：source='auto' 的翻成 'rejected'（**行留着**，
+        用户拒过什么是证据）；source='user' 的**整行删掉**——用户自己加的东西，
+        他自己撤了，没有留痕价值。
+
+    参数 tag_names：标签名字符串的列表，顺序无所谓，可以有重复和前后空格。
+    """
+    # 先洗干净：去空格、丢掉空串、去重，但保持用户看到的顺序（后面的逻辑按集合比）
+    cleaned = []
+    for name in tag_names:
+        name = name.strip()
+        if name and name not in cleaned:
+            cleaned.append(name)
+
+    conn = sqlite3.connect(db_path)
+
+    # ① 选中的：没有就建标签，再按「这个文件有没有这个标签」分两种写法
+    for name in cleaned:
+        tag_id = _get_or_create_tag(conn, name)
+        row = conn.execute(
+            "SELECT status FROM file_tags WHERE file_id = ? AND tag_id = ?",
+            (file_id, tag_id),
+        ).fetchone()
+        if row:
+            # 已有这行：只翻回 active。注意不写 source——被拒过的自动标签
+            # 应该继续标着 'auto'（是系统当初判的），只是用户现在又要了。
+            conn.execute(
+                "UPDATE file_tags SET status = 'active' WHERE file_id = ? AND tag_id = ?",
+                (file_id, tag_id),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO file_tags (file_id, tag_id, source, status)"
+                " VALUES (?, ?, 'user', 'active')",
+                (file_id, tag_id),
+            )
+
+    # ② 原来有效、这次没选中的：自动的留痕，用户加的删掉。
+    #    查出来的就是"这个文件现在有效的全部标签"，在 Python 里跟 cleaned 逐个比，
+    #    不写 SQL 的 NOT IN (...) —— 名字里的引号之类不用操心，判断也好读。
+    for tag_id, name, source in conn.execute(
+        "SELECT ft.tag_id, t.name, ft.source FROM file_tags ft JOIN tags t ON t.id = ft.tag_id"
+        " WHERE ft.file_id = ? AND ft.status = 'active'",
+        (file_id,),
+    ).fetchall():
+        if name in cleaned:
+            continue                       # 这次还选着，不动
+        if source == "auto":
+            conn.execute(
+                "UPDATE file_tags SET status = 'rejected' WHERE file_id = ? AND tag_id = ?",
+                (file_id, tag_id),
+            )
+        else:
+            conn.execute(
+                "DELETE FROM file_tags WHERE file_id = ? AND tag_id = ?",
+                (file_id, tag_id),
+            )
+
+    conn.commit()
+    conn.close()
+
+
+def add_auto_tag(file_id, tag_name, db_path=_DB_PATH):
+    """记一条**系统自动**判出来的标签（导入时调）。
+
+    **已经存在就什么都不做。** 具体说，靠 (file_id, tag_id) 这个复合主键加
+    INSERT OR IGNORE 实现：命中已有行时 SQLite 直接跳过，既不会把它激活、
+    也不会改它的 source。
+
+    这一点是本轮最重要的不变量：doc_type 每次导入都会重算，如果这里用
+    「重新对齐」的写法（先删后插、或者 INSERT OR REPLACE），用户在上次导入后
+    **特意去掉**的自动标签，就会被下一次导入悄无声息地又装回去——而且没有任何
+    提示。跟 _TOP_N、量具那几轮栽的是同一类错：改一处，另一处跟着动，没人发现。
+    所以这里宁可"不做事"，也不"对了齐"。tests/test_tags.py 里专门钉了一条。
+    """
+    conn = sqlite3.connect(db_path)
+    tag_id = _get_or_create_tag(conn, tag_name)
+    conn.execute(
+        "INSERT OR IGNORE INTO file_tags (file_id, tag_id, source, status)"
+        " VALUES (?, ?, 'auto', 'active')",
+        (file_id, tag_id),
+    )
+    conn.commit()
+    conn.close()
+
+
 def import_folder(folder, db_path=_DB_PATH):
     """扫描一个文件夹，把里面所有支持的文本文件导入数据库，返回导入数量。"""
     imported = 0  #导入数量
@@ -187,7 +364,13 @@ def import_folder(folder, db_path=_DB_PATH):
         course_name = suggest_course(name)       # 从文件名猜课程（猜不出返回 None）
         if course_name:
             info["suggested_course_id"] = get_or_create_course(course_name, db_path)
-        save_file(info, db_path)                 # 储存
+        file_id = save_file(info, db_path)       # 储存（返回这行的 id，下面挂标签要用）
+        # 自动标签：把分类器判出来的类型也记一条。
+        # 判成「未知」就不记——一个叫「未知」的标签是纯噪音，用户还得一个个去拒。
+        # 注意 add_auto_tag 对**已经有过这条记录**的文件什么都不做，
+        # 所以重复导入不会把用户拒掉的标签又装回去（见它的 docstring）。
+        if info["doc_type"] and info["doc_type"] != "未知":
+            add_auto_tag(file_id, info["doc_type"], db_path)
         imported += 1
     return imported
 

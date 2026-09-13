@@ -26,14 +26,43 @@ with st.spinner("检查索引…"):
 if _n_doc or _n_cut or _n_chunk:
     st.info(f"补建索引：文档向量 {_n_doc} 个；{_n_cut} 篇文件切出 {_n_chunk} 段并算好向量")
 
+# 标签数据在这里读**一次**，下面「文件库」的筛选和「标签」区都用它。
+# app.py 是平铺脚本、从上往下执行，顺序就是依赖关系——所以这块必须写在
+# 用到它的那两段**前面**，不能等到「标签」区再查。
+tags_by_file = {}      # {文件id: [(标签名, 来源, 状态), ...]}
+active_tags = set()    # 正在用的标签名（下面当筛选和编辑的选项用）
+for _fid, _name, _source, _status in store.list_file_tags():
+    tags_by_file.setdefault(_fid, []).append((_name, _source, _status))
+    if _status == "active":
+        active_tags.add(_name)
+active_tags = sorted(active_tags)
+
 st.header("文件库")
 rows = store.list_files()          # [(id, path, title, doc_type), ...]
 if rows:
-    st.write(f"共 {len(rows)} 个文件")
-    st.dataframe([
-        {"标题": title, "类型": doc_type or "—", "路径": path}
-        for _id, path, title, doc_type in rows
-    ])
+    # 按标签筛选：勾中**任意一个**就显示（并集）。这是"浏览"的用法——
+    # 想同时看两门课的讲义时，两个都勾上比让用户去理解"与/或"顺得多。
+    # 一个正在用的标签都没有就不渲染这个控件，免得上边挂个空框。
+    picked_tags = st.multiselect("按标签筛选", active_tags, key="filter_tags") if active_tags else []
+
+    table = []
+    for fid, path, title, doc_type in rows:
+        mine = [name for name, _src, status in tags_by_file.get(fid, []) if status == "active"]
+        if picked_tags and not set(mine) & set(picked_tags):
+            continue                   # 勾了标签，这个文件一个都不沾 → 不显示
+        table.append({
+            "标题": title, "类型": doc_type or "—",
+            "标签": "、".join(mine) or "—", "路径": path,
+        })
+
+    if picked_tags:
+        st.write(f"共 {len(table)} 个文件（按标签筛掉 {len(rows) - len(table)} 个）")
+    else:
+        st.write(f"共 {len(table)} 个文件")
+    if table:
+        st.dataframe(table)
+    else:
+        st.info("没有文件带这些标签")
 else:
     st.info("库里还没有文件，去左边导入一个文件夹")
 
@@ -107,12 +136,51 @@ else:
                 index=options.index(default),          # 默认选中系统建议的课程
                 key=f"pick_{fid}", label_visibility="collapsed",
             )
-            if c3.button("确认", key=f"ok_{fid}"):
+            # key 必须带 course_ 前缀：「整理方案」的确认按钮也叫 ok_{id}，
+            # 而**文件 id 和方案条目 id 是两套独立的数字，都从 1 开始**
+            # ——只要有份还没确认课程的文件，id 撞上某条 pending 方案条目，
+            # Streamlit 当场报 StreamlitDuplicateElementKey（ok_1 撞 ok_1），
+            # 两块内容一起渲染不出来。加前缀是为了把两个命名空间分开。
+            if c3.button("确认", key=f"course_ok_{fid}"):
                 if picked == _UNSET:
                     st.warning("请先选一门课")
                 else:
                     store.set_file_course(fid, name_to_id[picked])
                     st.rerun()
+
+st.header("标签")
+
+if not rows:
+    st.info("库里还没有文件，去左边导入一个文件夹")
+else:
+    st.caption("导入时按文件类型自动打了标签；在这里可以改，也可以自己加新的。")
+    for fid, _path, title, _doc_type in rows:
+        entries = tags_by_file.get(fid, [])          # [(标签名, 来源, 状态), ...]
+        mine = [name for name, _src, status in entries if status == "active"]   # 现在有效的
+        rejected = [name for name, _src, status in entries if status == "rejected"]  # 拒过的
+
+        c1, c2, c3 = st.columns([4, 5, 1])
+        c1.write(f"**{title}**")
+        # 跟上面「课程归属」不一样：这里**不做"确认过就把控件收起来"**。
+        # 课程是单选，定了就定了；标签是多值的、要能反复改，每次都得重新点开一遍
+        # 反而更烦。这是有意偏离课程区，不是漏写。
+        # 下面是本仓库第一个 st.multiselect。
+        # accept_new_options=True（Streamlit 1.45+）让用户能直接手输新标签，
+        # 不用再多放一个输入框。
+        # key 前缀用 tags_ / save_tag_，是特意跟「整理方案」的 ok_/no_ 错开的
+        # ——文件 id 和方案条目 id 是两套独立的数字，都从 1 开始，会撞车。
+        picked = c2.multiselect(
+            f"标签_{fid}", active_tags, default=mine,
+            key=f"tags_{fid}", accept_new_options=True,
+            label_visibility="collapsed",
+        )
+        if c3.button("保存", key=f"save_tag_{fid}"):
+            store.set_file_tags(fid, picked)
+            st.rerun()
+        if rejected:
+            # 拒过的自动标签得看得见。不然用户拒完就再也想不起来拒过什么，
+            # 也没法确认"重新导入会不会又冒出来"（不会，见 store.add_auto_tag）。
+            st.caption(f"已忽略的自动标签：{'、'.join(rejected)}")
 
 st.header("整理方案")
 

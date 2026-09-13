@@ -21,7 +21,7 @@ studyorganizer/   # 核心包（纯逻辑，可独立测试）
 | chunk | 把正文切成一段一段（自然段 + 超长段二次切）；纯函数 |
 | classify | 规则分类：判断资料类型 |
 | course | 从文件名猜课程归属（半自动，规则打底） |
-| store | SQLite 读写（files / courses / plan_items 三张表） |
+| store | SQLite 读写（files / courses / plan_items / chunks / tags / file_tags 六张表） |
 | search | 三种检索（标题关键词 / 正文 TF-IDF / 语义向量）+ 混合检索 + 模型加载 |
 | cluster | 层次聚类：内容相近的文件归组 |
 | index | 建索引：把正文算成向量存进库里，并判断哪些行过期了要重算 |
@@ -33,7 +33,8 @@ studyorganizer/   # 核心包（纯逻辑，可独立测试）
 导入文件
   → extract   提取标题/正文/元信息
   → classify  判断资料类型
-  → store     存入 files 表
+  → store     存入 files 表；类型的判断顺手记一条**自动标签**（source='auto'）
+              （判成「未知」不记——一个叫「未知」的标签是纯噪音）
   → index     ① 文档向量 → files.embedding（聚类用）
               ② 切段 chunk.chunk_text() → chunks 表
               ③ 段落向量 → chunks.embedding（检索用）
@@ -49,7 +50,14 @@ studyorganizer/   # 核心包（纯逻辑，可独立测试）
 
 聚类与整理：
   → cluster   内容相近的文件归组
-  → plan      生成归并建议 → 用户确认 → 导出报告
+  → plan      生成归并建议 → 用户确认 → 导出报告（报告里带上动作和原因）
+```
+
+标签的读写是两条路，别混：
+
+```
+自动（导入时）：classify_type → add_auto_tag()  → INSERT OR IGNORE（已有记录一律不动）
+人工（界面上）：用户勾选/手输 → set_file_tags() → 对齐写入（见「标签的三态」）
 ```
 
 ## 核心抽象：统一接口
@@ -386,6 +394,40 @@ ValueError: Incompatible dimension for X and Y matrices: X.shape[1] == 512 while
 做法：`files` 表存 `suggested_*` 列保留系统建议，最终值单独存；标签用 `status` 标记
 `active / rejected`，用户拒绝自动标签时改状态而非删除，保留「系统建议过什么」的记录。
 
+### 标签的三态（以及"去掉"的两种待遇）
+
+标签有**两个**来源、**两个**状态，组合出三种要区分的情况。这是 D-012「拒绝要留痕」
+在标签上的具体落法，也是整个标签系统唯一有分支的逻辑
+
+| 情况 | 库里怎么记 | 为什么要这样 |
+| --- | --- | --- |
+| 系统自动判出来的 | `source='auto'`, `status='active'` | 导入时由 `classify_type` 决定，用户不用动手 |
+| 用户自己加的 | `source='user'`, `status='active'` | 手输的标签，跟系统的分开记 |
+| **用户去掉了自动标签** | `source='auto'`, `status='rejected'`，**行留着** | D-012：拒绝本身是信息（D-006 要靠它沉淀训练数据），删了就永久丢了 |
+| 用户去掉了自己加的标签 | **整行删掉** | 那是用户自己的东西，他自己撤了，没有留痕价值 |
+
+两处容易写错的地方，各自有测试钉着（`tests/test_tags.py`）：
+
+- **自动标签绝不能被重新导入激活。** `doc_type` 每次导入都会重算，所以
+  `add_auto_tag()` 会被反复叫到同一个文件上。它走 `INSERT OR IGNORE`，命中已有行
+  （复合主键 `(file_id, tag_id)`）就**什么都不做**——既不激活、也不改 `source`。
+  如果写成"重新对齐"（先删后插 / `INSERT OR REPLACE`），用户上次特意去掉的标签会被
+  下一次导入**悄无声息**地装回去。这跟 `_TOP_N`、量具那几轮栽的是同一类错：
+  改一处，另一处跟着动，没人发现（NOTES.md 第 15 条）。
+- **重新选上被拒过的自动标签，`source` 不跟着变。** 用户"又想要了"不等于
+  "这是我手输的"——它本来就是系统判的，两者的区别要保住。
+
+### 课程为什么不做成一种标签
+
+课程和标签**各管各的**，课程归属不会变成标签。理由：课程已经有自己的表
+（`courses`）和确认流程（`suggested_course_id` → `course_id`），再在标签里存一份
+等于把同一件事记在两个地方——两边迟早对不上，且用户要维护两遍。
+
+这条也决定了标签的**边界**：标签只管「类型 + 用户自己起的名字」，不做课程的第二入口。
+中间试过一版「整理方案里提醒用户打标签」的建议（按「课程 + 类型」分组），删掉了，
+因为它两头不讨好：带上课程名就违反上面这条，去掉课程名又只剩类型、而类型标签导入时
+已经自动打了。**标签这条路就两条：导入时自动检测 + 用户在界面手动改。**
+
 ### 安全：只读 + 方案 + 确认
 导入阶段只读原文件，绝不移动/删除。整理动作以 `PlanItem` 形式生成，
 `status = pending`，用户确认后才执行，避免误删、误分类。
@@ -434,13 +476,15 @@ python tools/benchmark.py --model BAAI/bge-base-zh-v1.5     # 换模型对比
 
 ## 数据模型（SQLite 草案）
 
-> 注意：下面是**完整设计草案**。v0.1 已实现 `files` / `plan_items` / `courses` / `chunks`
-> 四张表（`files` 已加 `suggested_course_id` / `course_id`，见 D-012，另有 `is_scanned` /
-> `embedding` / `embedding_model`；`chunks` 见上文「切段」一节），
-> 其余（tags / file_tags）是后续设计，尚未实现。
+> 注意：下面是**完整设计草案**。v0.1 已实现 `files` / `plan_items` / `courses` / `chunks` /
+> `tags` / `file_tags` 六张表（`files` 已加 `suggested_course_id` / `course_id`，见 D-012，
+> 另有 `is_scanned` / `embedding` / `embedding_model`；`chunks` 见上文「切段」一节；
+> `tags` / `file_tags` 见下文「标签的三态」）。
 >
-> `chunks.file_id` 实际**没有**建外键约束，只记关系——和 `files.course_id` 的写法保持一致
+> `chunks.file_id` 和 `file_tags.file_id` / `file_tags.tag_id` 实际**没有**建外键约束，
+> 只记关系——和 `files.course_id` 的写法保持一致
 > （SQLite 的外键默认不生效，要每次连接都 `PRAGMA foreign_keys=ON` 才管用）。
+> **以 `store.py` 的实际建表语句为准，别照抄下面草案里的 `REFERENCES`。**
 >
 > **实际建表 SQL 以 `studyorganizer/store.py` 的 `init_db()` 为准。** 上面的 `files`
 > 草案里，`filename` / `size_bytes` / `mtime` / `review_status` / `imported_at` /
@@ -501,7 +545,7 @@ CREATE TABLE chunks (
 -- 整理方案（先建议、后确认、再执行）
 CREATE TABLE plan_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    action TEXT NOT NULL,                -- 归并 等
+    action TEXT NOT NULL,                -- 归并 等（导出报告直接拿它当小标题）
     files TEXT NOT NULL,                 -- 建议归并的文件标题（顿号连接）
     reason TEXT,                         -- 为什么
     status TEXT NOT NULL DEFAULT 'pending'  -- pending/confirmed/rejected

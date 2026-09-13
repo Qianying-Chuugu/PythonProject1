@@ -17,7 +17,7 @@
 
 ### 基础设施
 - [x] 项目骨架与模块划分（核心包 + Streamlit 壳分离）
-- [~] SQLite 表结构（已做 files / plan_items / courses / chunks；tags / file_tags 未做）
+- [x] SQLite 表结构（files / plan_items / courses / chunks / **tags / file_tags** 六张表都在）
 - [ ] 日志与可复现性（固定随机种子）
 
 ### 文本提取
@@ -30,8 +30,10 @@
 - [ ] 统一分类接口抽象（TypeClassifier）
 - [x] 规则分类器（讲义 / 作业 / 试卷 / 笔记 / 实验报告）
 - [x] 课程候选建议（CourseSuggester，半自动；规则打底：从文件名抽课程名）
-- [~] 用户修改 → 回写数据库（课程已做；标签未做）
-- [~] 建议值与用户修正分开落库（课程已做 suggested_course_id / course_id；标签未做）
+- [x] 用户修改 → 回写数据库（课程：`set_file_course`；标签：`set_file_tags`）
+- [x] 建议值与用户修正分开落库（课程 `suggested_course_id` / `course_id`；
+      标签 `file_tags.source` = auto / user，**去掉**自动标签翻成 `status='rejected'`
+      而不是删行——D-012 要求拒绝留痕。见 DESIGN.md「标签的三态」）
 
 ### 向量与索引
 - [x] 文档级向量（用于聚类；已持久化到 `files.embedding`）
@@ -107,7 +109,12 @@
 - [x] 聚类 → 整理方案依据（现为全局聚类，尚无「课程内」概念）
 
 ### 整理方案
-- [~] 建议方案生成（已做归并；重命名 / 打标签未做）
+- [~] 建议方案生成（已做归并；重命名未做）
+      - 试过加一条「打标签」建议（按「课程 + 类型」分组提醒用户打标签），**删掉了**：
+        带上课程名等于让用户把课程归属记两遍（违反 D-014），去掉课程名又只剩类型、
+        而类型标签导入时已经自动打了。见 DESIGN.md「课程为什么不做成一种标签」。
+      - 顺带修好 `export_report`：以前把 `action` 和 `reason` 全丢了、硬写「## 组N」，
+        现在小标题用条目自己的 action、并带上一行原因。
 - [x] 用户确认 / 拒绝
 - [x] 确认后执行（v1 仅做安全操作：导出整理报告）
 
@@ -120,8 +127,10 @@
 - [x] 新手教程 `tutorial.md`（Python 语法，已到第九课 + 综合练习）
 
 ### 测试
-- [x] pytest 覆盖核心模块（extract / chunk / classify / course / store / search / cluster / plan / index
-      共 9 个；涉及向量模型的路径用假模型 / 假函数替掉，测试不联网、不下载模型）
+- [x] pytest 覆盖核心模块（extract / chunk / classify / course / store / search / cluster / plan / index / tags
+      共 10 个；涉及向量模型的路径用假模型 / 假函数替掉，测试不联网、不下载模型）
+      - `tests/test_tags.py` 用真的临时库（tmp_path），钉住标签的三态，
+        重点是**被拒的自动标签不能被重新导入激活**（本轮最大的回归风险）。
 - [x] 真实模型的端到端检索测试：做成手动脚本 `tools/benchmark.py`
       （要加载模型，不适合放进默认测试集，pytest 里仍旧用假模型替身；
       见 DESIGN.md「可复现性」）

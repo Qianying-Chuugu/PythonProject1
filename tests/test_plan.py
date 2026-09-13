@@ -51,6 +51,27 @@ def test_生成方案_先清空旧建议再生成新的(monkeypatch):
     assert order == ["清空", "新增"]
 
 
+def test_生成方案_不会去查文件表(monkeypatch):
+    """回归：generate_plan 只该依赖聚类结果，不该顺手去扫 files 表。
+
+    曾经有过一版「打标签」建议，会调 store.list_files / list_files_with_course。
+    那个写法有个隐患——上面几条测试把这些函数桩掉了，可真跑起来它们读的是
+    **真正的 studyorganizer.db**，测试结果就跟着用户的实际数据变了。
+    这版删掉了那遍分组，这里用"把这两个函数换成会爆炸的桩"来钉住它不会被加回来。
+    """
+    def 不该被调用(*args, **kwargs):
+        raise AssertionError("generate_plan 不该去读 files 表")
+
+    monkeypatch.setattr(plan, "cluster_files", lambda model_name, threshold=0.3: {0: ["A", "B"]})
+    monkeypatch.setattr(store, "clear_plan_items", lambda db_path=store._DB_PATH: None)
+    monkeypatch.setattr(store, "add_plan_item", lambda *a, **k: None)
+    monkeypatch.setattr(store, "list_plan_items", lambda db_path=store._DB_PATH: [])
+    monkeypatch.setattr(store, "list_files", 不该被调用)
+    monkeypatch.setattr(store, "list_files_with_course", 不该被调用)
+
+    plan.generate_plan(_假模型)      # 不炸就算过
+
+
 def test_导出报告_只导出已确认的(monkeypatch, tmp_path):
     items = [
         (1, "归并", "讲义A、讲义B", "内容语义相近", "confirmed"),
@@ -69,6 +90,28 @@ def test_导出报告_只导出已确认的(monkeypatch, tmp_path):
     assert "讲义A" in content
     assert "笔记C" not in content                   # pending 的不导出
     assert "试卷E" not in content                   # rejected 的也不导出
+
+
+def test_导出报告_带上动作和原因(monkeypatch, tmp_path):
+    """报告的小标题用条目自己的 action，不能再硬写「## 组N」。
+
+    「组」只说"这是第几堆"，action 说的才是"建议你干嘛"。reason 以前也被整个
+    丢掉了——用户在报告里只看得到一串文件名，看不到为什么建议这么干。
+    """
+    items = [
+        (1, "归并", "讲义A、讲义B", "内容语义相近", "confirmed"),
+        (2, "归并", "笔记C、笔记D", "内容语义相近", "confirmed"),
+    ]
+    monkeypatch.setattr(store, "list_plan_items", lambda db_path=store._DB_PATH: items)
+
+    out = tmp_path / "整理方案.md"
+    plan.export_report(str(out))
+    content = out.read_text(encoding="utf-8")
+
+    assert "## 1. 归并" in content
+    assert "## 2. 归并" in content
+    assert "## 组1" not in content                  # 旧格式不许回来
+    assert "（内容语义相近）" in content
 
 
 def test_导出报告_没有已确认的就返回0且不建文件(monkeypatch, tmp_path):
