@@ -53,8 +53,12 @@
 
 **还没做**（正在做的，都在 [ROADMAP.md](ROADMAP.md) 里）：
 
-- 改成**相对阈值**：现在的相似度下限是绝对分数线，实测分不干净——「0-1 背包的状态
-  转移方程」这条，不相关段落里最高的那个（0.766）比答案里最高的（0.750）还高
+- 改**「前 3 段平均」这个合成规则**：现在的相似度下限（绝对 `0.45`）本身不用改了
+  ——「改成相对阈值」已经**量过，结论是不改**（相对线在"答案排第几"上打平，
+  在"没答案时返回几个文件"上反而差 6~8 倍，数据在 [DESIGN.md](DESIGN.md)）。
+  但「0-1 背包的状态转移方程」那条的病根还在：不相关段落里最高的那个（0.766）
+  比答案里最高的（0.750）还高，它最后能排第 1 靠的是"前 3 段平均"这个合成方式，
+  不是阈值——三个刚过线的错段落平均起来，赢过一段很准的对段落
 - 统一接口抽象（`TypeClassifier` / `Retriever`，为将来换实现做准备）
 - BM25、标签系统、文件重命名建议
 - 真实模型的端到端检索测试没进默认测试集（要下载模型，跑起来太慢）——
@@ -172,7 +176,7 @@ StudyOrganizer-Python/
 │   ├── cluster.py          #   层次聚类：把内容相近的文件归组
 │   └── plan.py             #   整理方案：生成 / 确认 / 导出报告
 ├── tools/
-│   └── benchmark.py        #   检索实测脚本：标准答案排第几 / 阈值扫描（手动跑）
+│   └── benchmark.py        #   检索实测脚本：标准答案排第几 / 阈值扫描 / 相对阈值扫描（手动跑）
 ├── tests/                  # pytest 测试
 ├── tutorial.md             # Python 语法教程 ← 新手从这里开始
 ├── NOTES.md                # 开发笔记：踩过的坑
@@ -254,9 +258,13 @@ gets written down right away.
 
 **Not done yet** (tracked in [ROADMAP.md](ROADMAP.md)):
 
-- **A relative threshold**: today's cutoff is an absolute similarity score, and measurement
-  shows it can't separate cleanly — for "what's the 0-1 knapsack transition equation", the
-  best *wrong* paragraph scores higher than the best *correct* one (0.766 vs 0.750)
+- **Reworking the "average of the top 3 paragraphs" rule**: the similarity cutoff itself
+  (an absolute `0.45`) is no longer on the list — a relative threshold was **measured and
+  rejected** (it ties on "which file ranks first" and is 6–8× *worse* at returning fewer
+  files for out-of-corpus queries; see [DESIGN.md](DESIGN.md)). But the knapsack query's
+  root cause is untouched: its best *wrong* paragraph scores higher than the best *correct*
+  one (0.766 vs 0.750), and it still ranks first thanks to the averaging rule — three
+  barely-passing wrong paragraphs out-average one very good right one, not because of the cutoff
 - Unified interfaces (`TypeClassifier` / `Retriever`) to make implementations swappable
 - BM25, a tag system, rename suggestions
 - Real-model end-to-end retrieval tests aren't in the default suite (they'd have to
