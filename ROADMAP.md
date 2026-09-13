@@ -55,7 +55,11 @@
 
 ### 界面
 - [~] app.py 入口 + ui/ 组件（入口已做；ui/ 组件目录未建，界面暂写在 app.py 里）
-- [x] 编写 README「运行方式」
+
+### 文档
+- [x] README「运行方式」
+- [x] 项目文档体系（README / DESIGN / DECISIONS / ROADMAP / CHANGELOG / NOTES）
+- [x] 新手教程 `tutorial.md`（Python 语法，已到第九课 + 综合练习）
 
 ### 测试
 - [~] pytest 覆盖核心模块（已覆盖 extract / classify / store；search / cluster / plan 未测）

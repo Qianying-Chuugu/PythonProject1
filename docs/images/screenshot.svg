@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="500" viewBox="0 0 900 500">
+  <rect width="900" height="500" fill="#f6f8fa"/>
+  <rect x="1" y="1" width="898" height="498" fill="none" stroke="#d0d7de" stroke-width="2" stroke-dasharray="8 8"/>
+  <text x="450" y="230" font-family="-apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="28" fill="#8b949e" text-anchor="middle">界面截图待补</text>
+  <text x="450" y="272" font-family="-apple-system, 'Segoe UI', sans-serif" font-size="18" fill="#8b949e" text-anchor="middle">Screenshot coming soon</text>
+  <text x="450" y="322" font-family="-apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="14" fill="#b1b8c0" text-anchor="middle">有图之后，替换 docs/images/ 下的这个文件，并改 README 里的图片链接</text>
+</svg>

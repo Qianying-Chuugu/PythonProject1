@@ -10,7 +10,7 @@
 app.py            # Streamlit 入口（薄，只做展示与交互）
   └── 调用 ↓
 studyorganizer/   # 核心包（纯逻辑，可独立测试）
-  extract/ classify/ store/ search/ cluster/ plan/
+  extract/ classify/ course/ store/ search/ cluster/ plan/
 ```
 
 ## 模块划分
@@ -19,8 +19,9 @@ studyorganizer/   # 核心包（纯逻辑，可独立测试）
 | --- | --- |
 | extract | 文本 / 标题 / 元信息提取（pdf / txt / md） |
 | classify | 规则分类：判断资料类型 |
-| store | SQLite 读写（files 表 + plan_items 表） |
-| search | 语义检索 + 模型加载（含向量化） |
+| course | 从文件名猜课程归属（半自动，规则打底） |
+| store | SQLite 读写（files / courses / plan_items 三张表） |
+| search | 三种检索（标题关键词 / 正文 TF-IDF / 语义向量）+ 混合检索 + 模型加载 |
 | cluster | 层次聚类：内容相近的文件归组 |
 | plan | 生成 / 确认 / 导出整理方案 |
 
@@ -34,7 +35,8 @@ studyorganizer/   # 核心包（纯逻辑，可独立测试）
 
 检索：
   自然语言 query
-  → search    语义向量检索（或标题关键词）
+  → search    三种方法：标题关键词 / 正文关键词（TF-IDF）/ 语义向量
+              各自归一化后加权 → 混合检索，结果附带「匹配原因」
 
 聚类与整理：
   → cluster   内容相近的文件归组
@@ -99,8 +101,12 @@ class Hit:
 ## 数据模型（SQLite 草案）
 
 > 注意：下面是**完整设计草案**。v0.1 已实现 `files` / `plan_items` / `courses` 三张表
-> （`files` 已加 `suggested_course_id` / `course_id`，见 D-012），
+> （`files` 已加 `suggested_course_id` / `course_id`，见 D-012，另有 `is_scanned`），
 > 其余（tags / file_tags / chunks）是后续设计，尚未实现。
+>
+> **实际建表 SQL 以 `studyorganizer/store.py` 的 `init_db()` 为准。** 上面的 `files`
+> 草案里，`filename` / `size_bytes` / `mtime` / `review_status` / `imported_at` /
+> `suggested_doc_type` / `suggestion_confidence` 等列**尚未实现**，是后续设计。
 
 ```sql
 -- 课程

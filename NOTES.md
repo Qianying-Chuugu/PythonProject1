@@ -41,7 +41,7 @@
 **核心道理**
 - `(x)` 就是 `x`，`(x,)` 才是元组。括号里只有一个元素时，**逗号决定它是不是元组**。
 
-**相关代码**：`test.py` 里的 `search_files()`（`SELECT ... WHERE title LIKE ?`）
+**相关代码**：`studyorganizer/store.py` 里的 `search_files()`（`SELECT ... WHERE title LIKE ?`）
 
 ## 3. 持久数据 vs 会话状态（网页一进去就显示旧方案）
 
