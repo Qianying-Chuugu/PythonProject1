@@ -5,7 +5,6 @@
 """
 
 import os
-
 from charset_normalizer import from_bytes
 import pymupdf
 

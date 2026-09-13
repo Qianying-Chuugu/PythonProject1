@@ -73,11 +73,12 @@ def import_folder(folder, db_path=_DB_PATH):
 
 
 def search_files(keyword, db_path=_DB_PATH):
-    """返回标题里包含 keyword 的所有文件 (id, path, title)。"""
+    """返回标题里包含 keyword 的所有文件 (id, path, title, 原因)。"""
     conn = sqlite3.connect(db_path)
     rows = conn.execute("SELECT id, path, title FROM files WHERE title LIKE ?",(f"%{keyword}%",)).fetchall()
     conn.close()
-    return rows
+    # 每条结果附一句"为什么匹配"：标题含了这个关键词
+    return [(fid, path, title, f"标题含「{keyword}」") for fid, path, title in rows]
 
 
 def list_file_texts(db_path=_DB_PATH):

@@ -1,6 +1,6 @@
 import streamlit as st
 from studyorganizer import store
-from studyorganizer.search import search_semantic
+from studyorganizer.search import search_semantic, search_keyword, search_hybrid
 from studyorganizer.plan import generate_plan, export_report
 
 st.title("📚 StudyOrganizer 课程资料整理")
@@ -33,8 +33,20 @@ keyword = st.text_input("按标题关键词搜", placeholder="比如「讲义」
 if keyword:
     results = store.search_files(keyword)
     if results:
-        for _id, path, title in results:
-            st.write(f"• {title}　（{path}）")
+        for _id, path, title, reason in results:
+            st.write(f"• {title}　—— {reason}　（{path}）")
+    else:
+        st.warning("没有匹配的文件")
+
+st.header("正文关键词搜索")
+kw_query = st.text_input("按正文关键词搜（TF-IDF）", placeholder="比如「动态规划」")
+if kw_query:
+    kw_results = search_keyword(kw_query)
+    if kw_results:
+        for title, _score, reason in kw_results:
+            st.write(f"• {title}　—— {reason}")
+    elif not rows:          # 结果为空有两种原因，分开提示
+        st.warning("库里没有文件，先去左边导入")
     else:
         st.warning("没有匹配的文件")
 
@@ -43,10 +55,25 @@ sem_query = st.text_input("用自然语言描述要找的内容", placeholder="�
 if sem_query:
     sem_results = search_semantic(sem_query)
     if sem_results:
-        for title, score in sem_results:
-            st.write(f"• {title}　（相关度 {score}）")
-    else:
+        for title, _score, reason in sem_results:   # _score 用不上（相似度已含在 reason 里）
+            st.write(f"• {title}　—— {reason}")
+    elif not rows:          # 结果为空有两种原因，分开提示
         st.warning("库里没有文件，先去左边导入")
+    else:
+        st.warning("没有匹配的文件")
+
+st.header("混合检索（三种方法加权）")
+hyb_query = st.text_input("输入搜索内容，看三种方法综合的结果", placeholder="比如「动态规划」")
+if hyb_query:
+    hyb_results = search_hybrid(hyb_query)
+    if hyb_results:
+        for title, score, reason in hyb_results:
+            st.write(f"• {title}　总分 {score}")
+            st.caption(f"原因：{reason}")      # 原因可能有好几条，独占一行更清楚
+    elif not rows:
+        st.warning("库里没有文件，先去左边导入")
+    else:
+        st.warning("没有匹配的文件")
 
 st.header("整理方案")
 
