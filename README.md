@@ -71,8 +71,8 @@
 ### 快速开始
 
 ```bash
-git clone https://github.com/Qianying-Chuugu/PythonProject1.git
-cd PythonProject1
+git clone https://github.com/Qianying-Chuugu/StudyOrganizer-Python.git
+cd StudyOrganizer-Python
 
 python -m venv .venv
 .venv\Scripts\activate          # Windows
@@ -139,7 +139,7 @@ streamlit run app.py
 ### 项目结构
 
 ```
-PythonProject1/
+StudyOrganizer-Python/
 ├── app.py                  # Streamlit 界面入口（薄壳，只做展示与交互）
 ├── studyorganizer/         # 核心包（纯逻辑，可独立测试）
 │   ├── extract.py          #   文本提取：txt / md / pdf、标题清洗、扫描件识别
@@ -246,8 +246,8 @@ gets written down right away.
 ### Quick start
 
 ```bash
-git clone https://github.com/Qianying-Chuugu/PythonProject1.git
-cd PythonProject1
+git clone https://github.com/Qianying-Chuugu/StudyOrganizer-Python.git
+cd StudyOrganizer-Python
 
 python -m venv .venv
 .venv\Scripts\activate          # Windows
@@ -306,7 +306,7 @@ in plain language and hitting Ctrl+F.
 ### Project layout
 
 ```
-PythonProject1/
+StudyOrganizer-Python/
 ├── app.py                  # Streamlit entry point (thin shell)
 ├── studyorganizer/         # Core package (pure logic, independently testable)
 │   ├── extract.py          #   Text extraction: txt / md / pdf, title cleanup, scanned-PDF detection
