@@ -50,13 +50,15 @@
   体积和耗时都只有 1/4。更有意思的是更大的 `bge-base` **排序反而更差**（20/21）——
   更大不等于更准。对照数据在 [DESIGN.md](DESIGN.md)，
   **可以用 `python tools/benchmark.py --model 模型名` 自己重跑**）
+- 相似度下限 `min_score` 同样是**量出来的**，现在是 `0.50`（之前是 `0.45`）。
+  提到 0.50 的实测：答案排第 1 仍是 21/21、最薄那条的最小领先翻倍（0.007 → 0.015），
+  而**问语料里没有的东西时，平均返回的文件数从 1.75 降到 0.25**（4 条探针里 3 条
+  一条都不返回，而不是硬凑几个最像的）；"有答案"的查询返回 5.0 个文件，跟默认
+  `top_k = 5` 正好齐平，**用户可见的结果一条没少**。`_TOP_N = 3` 和"换成相对阈值"
+  这两条也量过，结论都是不改（[DESIGN.md](DESIGN.md) 里有全部对照表）
 
 **还没做**（正在做的，都在 [ROADMAP.md](ROADMAP.md) 里）：
 
-- **试试把相似度下限从 `0.45` 提到 `0.50`**（`_TOP_N` 和相对阈值这两条已经量过、
-  结论都是不改，数据在 [DESIGN.md](DESIGN.md)）。0.50 的实测：排第 1 仍是 21/21
-  ——最小领先从 0.007 提到 0.015，**语料外查询返回的文件数从 1.8 降到 0.2**，
-  而"有答案"的查询返回 5.0 个文件——默认 `top_k` 就是 5，**用户可见的结果一条没少**
 - 统一接口抽象（`TypeClassifier` / `Retriever`，为将来换实现做准备）
 - BM25、标签系统、文件重命名建议
 - 真实模型的端到端检索测试没进默认测试集（要下载模型，跑起来太慢）——
@@ -253,15 +255,17 @@ gets written down right away.
   is actually **worse at ranking** (20/21) — bigger isn't more accurate.
   Comparison table in [DESIGN.md](DESIGN.md) — **you can rerun it yourself with
   `python tools/benchmark.py --model <name>`**)
+- The similarity cutoff `min_score` is **measured too**, and is now `0.50` (it used to be
+  `0.45`). At 0.50: still 21/21 on rank-1, the thinnest winning margin doubles
+  (0.007 → 0.015), and **out-of-corpus queries return 0.25 files on average instead of
+  1.75** (3 of the 4 probes return nothing at all, rather than padding the list with the
+  least-bad matches). Answer-bearing queries return 5.0 files — exactly the default
+  `top_k = 5`, so **nothing the user actually sees gets dropped**. The `_TOP_N = 3`
+  question and the relative-threshold idea were both measured and rejected (all the
+  comparison tables are in [DESIGN.md](DESIGN.md))
 
 **Not done yet** (tracked in [ROADMAP.md](ROADMAP.md)):
 
-- **Trying a similarity cutoff of `0.50` instead of `0.45`.** Both the `_TOP_N` question and
-  the relative-threshold idea were **measured and rejected** (data in
-  [DESIGN.md](DESIGN.md)). At 0.50: still 21/21 on rank-1, the thinnest winning margin goes
-  from 0.007 to 0.015, and out-of-corpus queries return **0.2 files instead of 1.8** — while
-  answer-bearing queries return 5.0, and the default `top_k` is already 5, so **nothing the
-  user actually sees gets dropped**
 - Unified interfaces (`TypeClassifier` / `Retriever`) to make implementations swappable
 - BM25, a tag system, rename suggestions
 - Real-model end-to-end retrieval tests aren't in the default suite (they'd have to
