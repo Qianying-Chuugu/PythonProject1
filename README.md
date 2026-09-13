@@ -45,10 +45,14 @@
 - 向量算一次就存进库里，正文变了或换了模型才重算（不会每次检索都现算）
 - 内容相近的文件自动聚类 → 生成整理方案 → 用户确认 → 导出报告
 - Streamlit 界面 + SQLite 持久化
+- 向量模型是在示例语料上**实测选出来**的，不是拍脑袋：`BAAI/bge-small-zh-v1.5`
+  （同样卡一个阈值，旧模型放行 74% 的段落、它只放行 31%，而且体积和耗时都只有 1/4。
+  对照数据在 [DESIGN.md](DESIGN.md)）
 
 **还没做**（正在做的，都在 [ROADMAP.md](ROADMAP.md) 里）：
 
-- 换区分度更强的中文向量模型（现在这个在短文本上分数挤得很紧，见 DESIGN.md）
+- 改成**相对阈值**：现在的相似度下限是绝对分数线，实测分不干净（相关段落最低 0.566、
+  不相关最高 0.653，区间重叠）
 - 统一接口抽象（`TypeClassifier` / `Retriever`，为将来换实现做准备）
 - BM25、标签系统、文件重命名建议
 - 真实模型的端到端检索测试没进默认测试集（要下载模型，跑起来太慢）
@@ -93,8 +97,8 @@ streamlit run app.py
    pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
    ```
 
-2. **首次运行会下载模型** —— 语义检索用的 `shibing624/text2vec-base-chinese`
-   第一次运行时会从 HuggingFace 下载（数百 MB）。国内直连通常下不动，先设镜像：
+2. **首次运行会下载模型** —— 语义检索用的 `BAAI/bge-small-zh-v1.5`
+   第一次运行时会从 HuggingFace 下载（约 90 MB）。国内直连通常下不动，先设镜像：
    ```bash
    # Windows (cmd)
    set HF_ENDPOINT=https://hf-mirror.com
@@ -117,17 +121,19 @@ streamlit run app.py
 下面是真实运行输出（`practice/` 语料，搜「怎么判断过拟合」）：
 
 ```
-机器学习 梯度下降讲义          0.634
-  原因：语义检索：第 4 段最相近（相似度 0.697）
-        「过拟合与欠拟合：- 过拟合：模型在训练集上表现很好，但在测试集上表现差…
-        ；文件分 = 最好的 3 段平均（全文共 6 段相关）
+机器学习 梯度下降讲义          0.576
+  原因：语义检索：第 4 段最相近（相似度 0.672）
+        「过拟合与欠拟合：- 过拟合：模型在训练集上表现很好，但在测试集上表现差，
+        泛化能力…」
+        文件分 = 最好的 2 段平均（全文共 2 段相关）
 ```
 
 混合检索把几路结果合成一个总分，命中的方法各自署名：
 
 ```
-机器学习 梯度下降讲义          总分 1.938
-  原因：正文关键词匹配（TF-IDF 分数 0.132）；语义检索：第 4 段最相近（相似度 0.614）…
+机器学习 梯度下降讲义          总分 2.0
+  原因：正文关键词匹配（TF-IDF 分数 0.106）；语义检索：第 4 段最相近（相似度 0.672）
+        「过拟合与欠拟合：- 过拟合：模型在训练集上表现很好，但在测试集上表现差…」
 ```
 
 有了**段号 + 片段**，你不用打开文件就知道该不该点进去。这也是「用自然语言搜」
@@ -233,11 +239,16 @@ gets written down right away.
   or you switch models (not on every search)
 - Cluster similar files → suggest a cleanup plan → you confirm → export a report
 - Streamlit UI + SQLite storage
+- The embedding model was **picked by measurement**, not by vibes: `BAAI/bge-small-zh-v1.5`
+  (at the same threshold the old model let 74% of paragraphs through; this one lets 31%
+  through — and it's a quarter of the size and a quarter of the time. Comparison table in
+  [DESIGN.md](DESIGN.md))
 
 **Not done yet** (tracked in [ROADMAP.md](ROADMAP.md)):
 
-- A Chinese embedding model with better separation (the current one compresses scores
-  into a narrow band — see DESIGN.md)
+- **A relative threshold**: today's cutoff is an absolute similarity score, and measurement
+  shows it can't separate cleanly (least-relevant correct paragraph 0.566, most-relevant
+  wrong paragraph 0.653 — the ranges overlap)
 - Unified interfaces (`TypeClassifier` / `Retriever`) to make implementations swappable
 - BM25, a tag system, rename suggestions
 - Real-model end-to-end retrieval tests aren't in the default suite (they'd have to
@@ -284,8 +295,8 @@ documents, hit 导入, and try the search boxes below.
    pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
    ```
 2. **The first run downloads a model** — semantic search uses
-   `shibing624/text2vec-base-chinese`, fetched from HuggingFace on first use
-   (several hundred MB). Set a mirror first if the direct connection stalls:
+   `BAAI/bge-small-zh-v1.5`, fetched from HuggingFace on first use
+   (about 90 MB). Set a mirror first if the direct connection stalls:
    ```bash
    export HF_ENDPOINT=https://hf-mirror.com   # macOS / Linux
    set HF_ENDPOINT=https://hf-mirror.com      # Windows (cmd)
@@ -304,17 +315,19 @@ matched, and shows you that chunk. This is a real run against the `practice/` co
 searching for 「怎么判断过拟合」 ("how do you tell overfitting"):
 
 ```
-机器学习 梯度下降讲义          0.634
-  原因：语义检索：第 4 段最相近（相似度 0.697）
-        「过拟合与欠拟合：- 过拟合：模型在训练集上表现很好，但在测试集上表现差…
-        ；文件分 = 最好的 3 段平均（全文共 6 段相关）
+机器学习 梯度下降讲义          0.576
+  原因：语义检索：第 4 段最相近（相似度 0.672）
+        「过拟合与欠拟合：- 过拟合：模型在训练集上表现很好，但在测试集上表现差，
+        泛化能力…」
+        文件分 = 最好的 2 段平均（全文共 2 段相关）
 ```
 
 Hybrid search merges the retrievers into one total score, crediting each one that hit:
 
 ```
-机器学习 梯度下降讲义          总分 1.938
-  原因：正文关键词匹配（TF-IDF 分数 0.132）；语义检索：第 4 段最相近（相似度 0.614）…
+机器学习 梯度下降讲义          总分 2.0
+  原因：正文关键词匹配（TF-IDF 分数 0.106）；语义检索：第 4 段最相近（相似度 0.672）
+        「过拟合与欠拟合：- 过拟合：模型在训练集上表现很好，但在测试集上表现差…」
 ```
 
 With the **chunk number + snippet** you can tell whether a file is worth opening without

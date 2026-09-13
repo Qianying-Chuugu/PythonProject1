@@ -26,9 +26,15 @@
 - 影响：扫描件（无文本层）识别为「需 OCR」，v1 不处理。
 
 ## D-005 用 Sentence Transformers 中文小模型
-- 决策：语义向量用 Sentence Transformers，候选 `shibing624/text2vec-base-chinese`（或 `paraphrase-multilingual-MiniLM`）。
-- 理由：CPU 可跑、无需显卡、不接付费大模型；中文语义检索质量足够。
-- 影响：首次联网下载模型，之后离线；模型路径固定缓存。
+- 决策：语义向量用 Sentence Transformers，模型定为 `BAAI/bge-small-zh-v1.5`。
+- 理由：CPU 可跑、无需显卡、不接付费大模型。**这个具体型号是在 practice/ 语料上实测选出来的**，
+  不是拍的：最开始用的是 `shibing624/text2vec-base-chinese`，它把相似度压缩得太厉害
+  （同样卡 0.45，会放行 74% 的段落，等于没过滤），正确答案和不相关段落之间只隔 0.1。
+  换成 bge-small 后，同样阈值只放行 31%，间距翻倍到三倍，而且**体积小 4 倍（92M vs 391M）、
+  编码快 4 倍**。更大的 `bge-base-zh-v1.5` 只在个别查询上略好，代价是 8 倍体积、6 倍耗时，不划算。
+- 备选：`BAAI/bge-base-zh-v1.5`（更准但重）、`paraphrase-multilingual-MiniLM`（中文偏弱）。
+- 影响：首次联网下载模型（约 90 MB），之后离线；模型路径固定缓存。
+  换模型不用写迁移代码——`embedding_model` 对不上就会自动全部重算（见 DESIGN.md）。
 
 ## D-006 类型分类：规则打底 + 统一接口 + 后续 ML
 - 决策：v1 用规则分类器，抽象统一接口，后续加 ML 实现。

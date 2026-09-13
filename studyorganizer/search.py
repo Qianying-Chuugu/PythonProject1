@@ -11,7 +11,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from studyorganizer import store
 
-MODEL_NAME = "shibing624/text2vec-base-chinese"   # index.py 也要用它判断向量有没有过期
+MODEL_NAME = "BAAI/bge-small-zh-v1.5"   # index.py 也要用它判断向量有没有过期
 _model = None
 
 def get_model():
@@ -39,11 +39,13 @@ def search_semantic(query, top_k=5, min_score=0.45):
     参数 min_score：段落相似度下限，低于它的段落直接丢掉（0~1，越大越严格）。
     返回 [(标题, 分数, 原因), ...]，分数从高到低。
 
-    关于默认门槛 0.45：这是**实测**出来的，不是拍的。在 practice/ 语料上量过——
-    text2vec 这个模型给出的相似度挤在很窄的区间里（跟查询无关的段落也能到 0.45~0.54，
-    而正确答案大约 0.65~0.77），取 0.3 的话 99% 的段落都能过关，等于没过滤。
-    取 0.45 能砍掉明显跑题的尾部，又不会误伤"写得不一样但确实相关"的段落。
-    注意它只能砍尾部、分不出细微好坏——真正决定顺序的是排序，不是这个阈值。
+    关于默认门槛 0.45：这是**实测**出来的，不是拍的。bge-small 给出的相似度同样会
+    "压缩"（跟查询无关的段落落在 0.2~0.55），但比原来用的 text2vec 好得多：
+    同样卡 0.45 这条线，text2vec 会放行 74% 的段落（等于没过滤），bge-small 只放行
+    31%；正确答案大约 0.6~0.79，跟不相关的拉开了明显距离。
+    换模型时**刻意没有重调这个数**——把手上几条查询调到"全对"大约要到 0.66，
+    但那是拿 3 个查询过拟合出来的，换批资料就会翻车。0.45 的定位始终只是
+    "砍掉明显跑题的尾部"；真正决定顺序的是排序，不是这个阈值。
 
     为什么按段落算：长文档整篇压成一个向量会把细节"平均"掉。一篇 30 页的讲义里
     只有一段讲了背包问题，整篇的向量跟"背包问题"并不像，整篇算就搜不到；

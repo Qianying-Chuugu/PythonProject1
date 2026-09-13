@@ -113,7 +113,9 @@ def test_换了模型全部重算(tmp_path, monkeypatch):
     monkeypatch.setattr(index, "get_model", lambda: _假模型())
     index.ensure_embeddings(db)
 
-    # 假装模型换了一个（比如以后从 text2vec 换成别的）
+    # 假装模型换了一个。这条不是纸上谈兵：项目真的换过一次模型
+    # （text2vec-base-chinese → bge-small-zh-v1.5），靠的就是下面这条判断把
+    # 库里的旧向量全部作废重算，一行迁移代码都没写。
     monkeypatch.setattr(index, "MODEL_NAME", "另一个模型")
 
     # 旧向量是旧模型算的，和新模型的向量不在同一个空间里，比对没有意义 → 全都要重算
