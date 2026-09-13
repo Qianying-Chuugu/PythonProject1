@@ -15,11 +15,11 @@ def cluster_files(threshold=0.3):
     参数 threshold：距离阈值，越大合并越狠、堆越少（余弦距离 0~1）。
     返回 {堆号: [标题列表], ...}
     """
-    model = _get_model()
     rows = store.list_file_texts()
     if not rows:
-        return {}
+        return {}                           # 库是空的就直接返回，别白加载模型
 
+    model = _get_model()
     titles = [r[1] for r in rows]
     texts = [r[2] for r in rows]
 

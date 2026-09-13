@@ -62,4 +62,6 @@
 - [x] 新手教程 `tutorial.md`（Python 语法，已到第九课 + 综合练习）
 
 ### 测试
-- [~] pytest 覆盖核心模块（已覆盖 extract / classify / store；search / cluster / plan 未测）
+- [x] pytest 覆盖核心模块（extract / classify / course / store / search / cluster / plan 共 7 个；
+      涉及向量模型的路径用假模型 / 假函数替掉，测试不联网、不下载模型）
+- [ ] 语义检索 `search_semantic` 的真实路径（需要加载模型）目前没有测试

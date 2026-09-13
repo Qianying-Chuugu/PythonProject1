@@ -5,7 +5,6 @@
 3. 混合检索：把上面几种（含标题关键词）各自归一化后加权合成一个总分。
 """
 
-from sentence_transformers import SentenceTransformer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from studyorganizer import store
@@ -17,6 +16,9 @@ def _get_model():
     """加载模型（第一次调用时才真正加载，之后复用）。"""
     global _model
     if _model is None:
+        # 延迟导入：sentence_transformers 会连带拉进 torch，很重（光 import 就要好几秒）。
+        # 写在函数里，只有真正要用模型时才付这笔开销。见 NOTES.md 第 4 条。
+        from sentence_transformers import SentenceTransformer
         _model = SentenceTransformer(_MODEL_NAME)
     return _model
 
@@ -27,11 +29,11 @@ def search_semantic(query, top_k=5, min_score=0.3):
     参数 min_score：相似度下限，低于它的直接丢掉（0~1，越大越严格）。
     返回 [(标题, 相似度, 原因), ...]，相似度从高到低。
     """
-    model = _get_model()
     rows = store.list_file_texts()
     if not rows:
-        return []
+        return []                           # 库是空的就直接返回，别白加载模型
 
+    model = _get_model()
     titles = [r[1] for r in rows]           # 所有标题
     texts = [r[2] for r in rows]            # 所有正文
 

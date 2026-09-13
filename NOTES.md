@@ -61,3 +61,38 @@
 - Streamlit 每次交互都重跑脚本，普通变量会丢，`st.session_state` 能跨重跑保留。
 
 **相关代码**：`app.py` 的整理方案部分
+
+## 4. 导入慢：把重的库留到「用的时候」再 import
+
+**遇到的问题**
+- 跑 `pytest` 要 5 秒多，可测试本身几乎不耗时——全是些判断和比较，真正跑起来不到 1 秒。
+- 怪的是：这些测试**根本没用语义模型**，那时间花在哪了？
+
+**根本原因**
+- 写在文件最顶上的 `import`，在这个模块**被导入的那一刻**就会执行。
+- `sentence_transformers` 会连带把 `torch` 一起拉进来，那是个很大的库，光 import 就要好几秒。
+- 测试文件开头写了 `from studyorganizer.search import ...`，于是光是这一行就付了这笔钱——
+  哪怕测试压根不碰模型。
+
+**解决方法（延迟导入）**
+- 把它从文件顶部**移进真正用到它的那个函数里**：
+
+```python
+def _get_model():
+    global _model
+    if _model is None:
+        from sentence_transformers import SentenceTransformer   # 用到了才 import
+        _model = SentenceTransformer(_MODEL_NAME)
+    return _model
+```
+
+- 效果：测试从 **5.4 秒 → 1.5 秒**；`import studyorganizer.search` 之后 `torch` 也确实没被加载
+  （可以用 `sys.modules` 验证：`'torch' in sys.modules` 是 `False`）。
+
+**核心道理**
+- **写在顶部的 `import` 是「不管用不用都要付的钱」；写进函数里是「用了才付」。**
+- 判断标准：这个库是不是**又重、又不是每次都用**？是 → 就延迟导入。
+- 不用担心会变慢：`import` 有缓存，第二次执行几乎零开销。
+- 但别无脑用：轻量的库（`os`、`json`）放顶部更清楚。到处延迟导入会让人**看不出这个模块依赖什么**。
+
+**相关代码**：`studyorganizer/search.py` 的 `_get_model()`
