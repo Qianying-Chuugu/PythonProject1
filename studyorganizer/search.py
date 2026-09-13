@@ -1,6 +1,7 @@
 """search 模块：三种检索 + 混合。
 
-1. 语义检索：把文字变成向量，找意思最相近的文件（不要求出现相同关键词）。
+1. 语义检索：把每一段文字变成向量，找意思最相近的文件（不要求出现相同关键词）。
+   按段落比而不是整篇比，长文档里的细节才不会被"平均"掉。
 2. 正文关键词检索：用 TF-IDF，找正文里字面匹配关键词的文件。
 3. 混合检索：把上面几种（含标题关键词）各自归一化后加权合成一个总分。
 """
@@ -24,35 +25,75 @@ def get_model():
     return _model
 
 
-def search_semantic(query, top_k=5, min_score=0.3):
+_TOP_N = 3          # 算文件分时，最多拿最好的几段来平均
+
+
+def _snippet(text, limit=40):
+    """截一小段正文给人看，太长了加省略号。"""
+    return text[:limit] + ("…" if len(text) > limit else "")
+
+
+def search_semantic(query, top_k=5, min_score=0.45):
     """
     语义搜索：返回和 query 意思最相近的 top_k 个文件。
-    参数 min_score：相似度下限，低于它的直接丢掉（0~1，越大越严格）。
-    返回 [(标题, 相似度, 原因), ...]，相似度从高到低。
-    """
-    rows = store.list_file_vectors()
-    if not rows:
-        return []                           # 库是空的（或还没建索引）就直接返回
+    参数 min_score：段落相似度下限，低于它的段落直接丢掉（0~1，越大越严格）。
+    返回 [(标题, 分数, 原因), ...]，分数从高到低。
 
-    titles = [r[1] for r in rows]           # 所有标题
-    # 存进去的是裸字节（.tobytes()），取出来必须按当初的类型 float32 还原。
-    # 类型写错不会报错，只会读出一堆垃圾数字——所以这里和 index.py 的
-    # vector.tobytes() 必须一直保持一致。用 vstack 顺便拼成二维数组。
-    doc_vecs = np.vstack([np.frombuffer(r[2], dtype=np.float32) for r in rows])
+    关于默认门槛 0.45：这是**实测**出来的，不是拍的。在 practice/ 语料上量过——
+    text2vec 这个模型给出的相似度挤在很窄的区间里（跟查询无关的段落也能到 0.45~0.54，
+    而正确答案大约 0.65~0.77），取 0.3 的话 99% 的段落都能过关，等于没过滤。
+    取 0.45 能砍掉明显跑题的尾部，又不会误伤"写得不一样但确实相关"的段落。
+    注意它只能砍尾部、分不出细微好坏——真正决定顺序的是排序，不是这个阈值。
+
+    为什么按段落算：长文档整篇压成一个向量会把细节"平均"掉。一篇 30 页的讲义里
+    只有一段讲了背包问题，整篇的向量跟"背包问题"并不像，整篇算就搜不到；
+    按段落算才能精确命中讲那段话的地方。
+    """
+    rows = store.list_chunk_vectors()   # [(文件id, 标题, 段号, 段落正文, 向量), ...]
+    if not rows:
+        return []                       # 库是空的（或还没建索引）就直接返回
+
+    titles = [r[1] for r in rows]
+    seqs = [r[2] for r in rows]
+    texts = [r[3] for r in rows]
+    # 裸字节必须按当初的 float32 还原。存的时候怎么写的，这里就得怎么读——
+    # 类型写错不会报错，只会读出一堆垃圾数字。用 vstack 顺便拼成二维数组。
+    chunk_vecs = np.vstack([np.frombuffer(r[4], dtype=np.float32) for r in rows])
 
     model = get_model()
-    query_vec = model.encode([query])       # 问题 → 向量（查询词每次都要现算，没存过）
-    scores = cosine_similarity(query_vec, doc_vecs)[0]  # 每篇的相似度 0-1,此处生成的余弦相似度只有一行
+    query_vec = model.encode([query])   # 问题 → 向量（查询词每次现算，没存过）
+    scores = cosine_similarity(query_vec, chunk_vecs)[0]
 
-    pairs = [(t, s) for t, s in zip(titles, scores) if s >= min_score]  # 相似度太低 = 不相关，丢掉
-    pairs.sort(key=lambda p: p[1], reverse=True)  # 按分数从高到低排
-    # 每个结果附一句"为什么匹配"：方法名 + 命中详情。
+    # ① 丢掉"不沾边"的段落，再按文件分组。
+    #    这一步是关键：低分段落绝不能算进下面的平均分，否则一篇"只有一段
+    #    讲对了"的好文件会被周围一堆 0.1 分的废话拉垮，反而排不上来。
+    #    （严格说，先过滤再取前 3 和先取前 3 再过滤结果是一样的——过滤是
+    #      按分数线切的，排序又保证够格的都排在不够格的前面，两者可以交换。
+    #      所以别纠结顺序，重点是这一步必须做。）
+    per_file = {}                       # {标题: [(分数, 段号, 段落正文), ...]}
+    for title, seq, text, score in zip(titles, seqs, texts, scores):
+        if score >= min_score:
+            per_file.setdefault(title, []).append((float(score), seq, text))
 
+    # ② 一个文件的分数 = 它最好的前 3 段的平均分。
+    #    取平均而不是取最高分：既奖励"有一段特别准"，也奖励"好几段都相关"，
+    #    而且不像取最高分那样偏向段落多的长文档（段落多，蒙中高分的机会就多）。
     results = []
-    for t, s in pairs[:top_k]:
-        s = round(float(s), 3)
-        results.append((t, s, f"语义检索：意思相近（相似度 {s}）"))
-    return results
+    for title, hits in per_file.items():
+        hits.sort(key=lambda h: h[0], reverse=True)
+        top = hits[:_TOP_N]
+        score = sum(h[0] for h in top) / len(top)
+
+        best_score, best_seq, best_text = hits[0]     # 分数最高的那段拿来解释
+        reason = (f"语义检索：第 {best_seq} 段最相近（相似度 {best_score:.3f}）"
+                  f"「{_snippet(best_text)}」")
+        if len(hits) > 1:
+            # 文件分是平均来的，不说明一下的话用户会觉得"为什么分数比上面低"
+            reason += f"；文件分 = 最好的 {len(top)} 段平均（全文共 {len(hits)} 段相关）"
+        results.append((title, round(score, 3), reason))
+
+    results.sort(key=lambda r: r[1], reverse=True)
+    return results[:top_k]
 
 
 def search_keyword(query, top_k=5):

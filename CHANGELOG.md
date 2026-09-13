@@ -37,12 +37,26 @@
 - 界面导入改用 `index.import_and_index`；启动时自动补一次索引，
   升级前导入的老库不用手动重导
 - 新增 `tests/test_index.py`（6 个用例，覆盖上述四种过期情况 + 导入建索引）
+- 段落级向量：新增 `studyorganizer/chunk.py`（`chunk_text()` 切段）与 `chunks` 表，
+  由 `index.ensure_chunk_embeddings()` 负责切段 + 补向量
+- `chunks` 表结构与 `files` 表对称（`embedding` + `embedding_model`），过期判断同一套；
+  正文变了则把该文件的段落整批删掉，下次重新切、重新算
+- 语义检索 `search_semantic` 改为**按段落**匹配：丢掉低于 `min_score` 的段落，
+  同文件取最好的 3 段平均当文件分；原因里带上命中的段号与片段
+- `practice/` 新增两个长样本：`算法_动态规划长讲义.txt`（4159 字 → 22 段）、
+  `操作系统_进程调度长讲义.pdf`（5 页，每页一个「自然段」→ 二次切分）
+- 新增 `tests/test_chunk.py`（10 个用例）；`test_index.py` 补 5 个段落后端用例；
+  `test_search.py` 补 6 个「段落合成文件分」用例
 
 ### Fixed
 - 语义分数是 numpy `float32`，直接 `round` 后打印成长小数
   （如 `0.5419999957084656`），显示前先转 `float`
 - `save_file` 由 `INSERT OR REPLACE` 改为 `INSERT ... ON CONFLICT(path) DO UPDATE`：
   原先重复导入会把用户确认的 `course_id` 抹成 NULL
+- `list_files_without_chunks` 原先用 SQL 的 `trim(text) != ''` 判断正文是否为空，
+  但 **SQLite 的 `trim()` 只去空格、不去换行**，导致「正文只有几个换行」的文件
+  每次都被当成没切过、反复重切（切又切不出段，永远轮不到它被标记成已处理）。
+  判断挪到 Python 里用 `str.strip()`
 
 ### Changed
 - 移出第一版范围：相似文件检测（含字节哈希 / SimHash / 语义相似三层去重）。
@@ -54,3 +68,7 @@
 - `search.py` 的 `_get_model` / `_MODEL_NAME` 改为公开的 `get_model` / `MODEL_NAME`，
   供 `index.py` 复用（私有名字跨模块用不合适）。
 - `requirements.txt` 补上 `numpy`（`search.py` / `cluster.py` / `index.py` 直接用它）。
+- `search_semantic` 的 `min_score` 默认值由 `0.3` 提到 `0.45`。这是**实测校准**的结果：
+  在 `practice/` 语料上，`0.3` 会让 99% 的段落过关、等于没过滤；`0.45` 能砍掉明显
+  跑题的尾部（详见 DESIGN.md「检索结果怎么从段落合成到文件」）。
+- `app.py` 启动时同时补文档向量和段落向量，导入走 `index.import_and_index`（不变）。

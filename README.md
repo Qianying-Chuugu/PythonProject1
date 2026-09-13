@@ -41,16 +41,17 @@
 - 自动判断资料类型：讲义 / 作业 / 试卷 / 笔记 / 实验报告
 - 从文件名猜课程归属（半自动，界面上确认或修改）
 - **三种检索 + 混合检索**：文件名关键词 / 正文关键词（TF-IDF）/ 语义向量，结果带「匹配原因」
+- **语义检索按段落比**：切段 → 每段存一个向量 → 命中后告诉你**是哪一段**、并把那一段贴出来
+- 向量算一次就存进库里，正文变了或换了模型才重算（不会每次检索都现算）
 - 内容相近的文件自动聚类 → 生成整理方案 → 用户确认 → 导出报告
 - Streamlit 界面 + SQLite 持久化
 
 **还没做**（正在做的，都在 [ROADMAP.md](ROADMAP.md) 里）：
 
-- 段落级向量（目前语义检索是整篇文档级的，长文档会稀释语义）
-- 向量持久化（现在每次检索都现算，所以慢）
+- 换区分度更强的中文向量模型（现在这个在短文本上分数挤得很紧，见 DESIGN.md）
 - 统一接口抽象（`TypeClassifier` / `Retriever`，为将来换实现做准备）
 - BM25、标签系统、文件重命名建议
-- 测试目前只覆盖 `extract` / `classify` / `store` 三个模块
+- 真实模型的端到端检索测试没进默认测试集（要下载模型，跑起来太慢）
 
 > ⚠️ **项目还在开发中**，接口和数据结构都可能变。现在跟上的话，你能看着它一点点长完。
 
@@ -64,7 +65,7 @@
 | 2 | [`studyorganizer/extract.py`](studyorganizer/extract.py) | 整个项目里最简单的一个模块，79 行。看完你就知道一个模块长什么样了。 |
 | 3 | [`NOTES.md`](NOTES.md) | 我踩过的坑。**写代码报错的时候，先来这儿查。** |
 | 4 | [`DECISIONS.md`](DECISIONS.md) | 想知道「为什么要这么写」的时候读。每条都是「决策 → 理由」。 |
-| 5 | 其余模块 | 按 `classify → course → store → search → cluster → plan` 的顺序，由浅入深。 |
+| 5 | 其余模块 | 按 `chunk → classify → course → store → index → search → cluster → plan` 的顺序，由浅入深。 |
 
 **如果你只想把它跑起来用**，往下看「快速开始」。
 
@@ -106,25 +107,34 @@ streamlit run app.py
    ```
    下载一次之后会缓存到本地，以后离线也能用。
 
-> 提示：如果你还没有资料可以试，`app.py` 默认的路径是 `practice`。
-> 这个文件夹**目前不在仓库里**，需要你自己建一个、丢几个 `.txt` 或 `.md` 进去。
+> 提示：如果你还没有资料可以试，仓库里的 `practice/` 就是一份现成的示例语料
+> （20 篇短资料，外加一篇 4000 字的讲义和一份 5 页的 PDF，专门用来试长文档检索）。
+> `app.py` 默认的路径就是它，clone 下来直接点「导入」即可。
 
 ### 检索结果长什么样
 
-每个结果都会说明**为什么命中**。输出格式形如：
+每个结果都会说明**为什么命中**；语义检索还会告诉你**命中在哪一段**，并把那一段贴出来。
+下面是真实运行输出（`practice/` 语料，搜「怎么判断过拟合」）：
 
 ```
-动态规划 第7章        总分 2.41
-  原因：标题含「动态规划」；正文关键词匹配（TF-IDF 分数 1.000）；语义检索：意思相近（相似度 0.912）
-
-2023期中试卷          总分 0.87
-  原因：语义检索：意思相近（相似度 0.874）
+机器学习 梯度下降讲义          0.634
+  原因：语义检索：第 4 段最相近（相似度 0.697）
+        「过拟合与欠拟合：- 过拟合：模型在训练集上表现很好，但在测试集上表现差…
+        ；文件分 = 最好的 3 段平均（全文共 6 段相关）
 ```
 
-第二条是关键：**它标题里没有「动态规划」，正文里也没出现这个词，
-但它是靠语义被找出来的。** 这就是「用自然语言搜」和「Ctrl+F」的区别。
+混合检索把几路结果合成一个总分，命中的方法各自署名：
 
-> 上面是**格式示意**，不是真实运行输出。你可以自己跑一遍看实际结果。
+```
+机器学习 梯度下降讲义          总分 1.938
+  原因：正文关键词匹配（TF-IDF 分数 0.132）；语义检索：第 4 段最相近（相似度 0.614）…
+```
+
+有了**段号 + 片段**，你不用打开文件就知道该不该点进去。这也是「用自然语言搜」
+和「Ctrl+F」的区别：语义那一路不需要标题或正文里出现你问的那几个字。
+
+> 上面是真实输出，但**分数在不同语料上不可比**——这里只用来说明格式，
+> 以及「为什么每个结果都要带原因」。换一批资料，绝对分数会变。
 
 ### 几个设计上的取舍
 
@@ -143,9 +153,11 @@ StudyOrganizer-Python/
 ├── app.py                  # Streamlit 界面入口（薄壳，只做展示与交互）
 ├── studyorganizer/         # 核心包（纯逻辑，可独立测试）
 │   ├── extract.py          #   文本提取：txt / md / pdf、标题清洗、扫描件识别
+│   ├── chunk.py            #   把正文切成一段一段（自然段 + 超长段二次切）
 │   ├── classify.py         #   规则分类：讲义 / 作业 / 试卷 / 笔记 / 实验报告
 │   ├── course.py           #   从文件名猜课程归属（半自动）
 │   ├── store.py            #   SQLite 存储：建表 / 存取 / 查询 / 整理方案
+│   ├── index.py            #   建索引：算向量存库 + 判断哪些行过期要重算
 │   ├── search.py           #   三种检索（标题关键词 / TF-IDF / 语义）+ 混合检索
 │   ├── cluster.py          #   层次聚类：把内容相近的文件归组
 │   └── plan.py             #   整理方案：生成 / 确认 / 导出报告
@@ -215,17 +227,21 @@ gets written down right away.
 - Guess the course from the filename (semi-automatic — you confirm in the UI)
 - **Three retrievers + hybrid search**: filename keywords / full-text TF-IDF / semantic
   embeddings, with an explanation attached to every hit
+- **Semantic search works at paragraph level**: text is split into chunks, each gets its
+  own vector, and a hit tells you **which chunk** matched and shows you that chunk
+- Embeddings are computed once and stored; they're only recomputed when the text changes
+  or you switch models (not on every search)
 - Cluster similar files → suggest a cleanup plan → you confirm → export a report
 - Streamlit UI + SQLite storage
 
 **Not done yet** (tracked in [ROADMAP.md](ROADMAP.md)):
 
-- Paragraph-level embeddings (semantic search is document-level today, which dilutes
-  meaning on long files)
-- Persisting embeddings (they're recomputed on every search, so it's slow)
+- A Chinese embedding model with better separation (the current one compresses scores
+  into a narrow band — see DESIGN.md)
 - Unified interfaces (`TypeClassifier` / `Retriever`) to make implementations swappable
 - BM25, a tag system, rename suggestions
-- Tests currently cover only `extract` / `classify` / `store`
+- Real-model end-to-end retrieval tests aren't in the default suite (they'd have to
+  download the model, so they're too slow)
 
 > ⚠️ **Work in progress.** APIs and data structures will change. If you start now,
 > you get to watch it grow.
@@ -240,6 +256,7 @@ gets written down right away.
 | 2 | [`studyorganizer/extract.py`](studyorganizer/extract.py) | The simplest module in the project, 79 lines. After this you know what a module looks like. |
 | 3 | [`NOTES.md`](NOTES.md) | Pitfalls I hit. **Check here first when something breaks.** |
 | 4 | [`DECISIONS.md`](DECISIONS.md) | Every design choice, as "decision → rationale". |
+| 5 | The rest | In this order: `chunk → classify → course → store → index → search → cluster → plan`. |
 
 **If you just want to run it**, see below.
 
@@ -275,23 +292,39 @@ documents, hit 导入, and try the search boxes below.
    ```
    It's cached locally after the first download and works offline afterwards.
 
+> Tip: if you don't have your own documents handy, the `practice/` folder in this repo
+> is a ready-made sample corpus (20 short files, plus a 4000-character lecture note and
+> a 5-page PDF, there specifically to exercise long-document search). That's the path
+> `app.py` defaults to — clone, hit import, done.
+
 ### What a result looks like
 
-Every hit explains **why** it matched. Output looks roughly like:
+Every hit explains **why** it matched; semantic search also tells you **which chunk**
+matched, and shows you that chunk. This is a real run against the `practice/` corpus,
+searching for 「怎么判断过拟合」 ("how do you tell overfitting"):
 
 ```
-动态规划 第7章        总分 2.41
-  原因：标题含「动态规划」；正文关键词匹配（TF-IDF 分数 1.000）；语义检索：意思相近（相似度 0.912）
-
-2023期中试卷          总分 0.87
-  原因：语义检索：意思相近（相似度 0.874）
+机器学习 梯度下降讲义          0.634
+  原因：语义检索：第 4 段最相近（相似度 0.697）
+        「过拟合与欠拟合：- 过拟合：模型在训练集上表现很好，但在测试集上表现差…
+        ；文件分 = 最好的 3 段平均（全文共 6 段相关）
 ```
 
-The second one is the point: **neither its title nor its body contains the phrase
-"动态规划"** — semantic search found it anyway. That's the difference between searching
-in plain language and hitting Ctrl+F.
+Hybrid search merges the retrievers into one total score, crediting each one that hit:
 
-> The above illustrates the *format*, not a real run. Clone it and see for yourself.
+```
+机器学习 梯度下降讲义          总分 1.938
+  原因：正文关键词匹配（TF-IDF 分数 0.132）；语义检索：第 4 段最相近（相似度 0.614）…
+```
+
+With the **chunk number + snippet** you can tell whether a file is worth opening without
+opening it. That's also the difference between searching in plain language and hitting
+Ctrl+F: the semantic retriever doesn't need your query terms to appear in the title or
+body at all.
+
+> That's real output, but **scores aren't comparable across corpora** — it's here to show
+> the format and why every result carries its reasons. Swap in your own files and the
+> absolute numbers will move.
 
 ### Design trade-offs
 
@@ -310,9 +343,11 @@ StudyOrganizer-Python/
 ├── app.py                  # Streamlit entry point (thin shell)
 ├── studyorganizer/         # Core package (pure logic, independently testable)
 │   ├── extract.py          #   Text extraction: txt / md / pdf, title cleanup, scanned-PDF detection
+│   ├── chunk.py            #   Split a document into chunks (paragraphs, then sliding window)
 │   ├── classify.py         #   Rule-based classification: lecture / assignment / exam / note / lab report
 │   ├── course.py           #   Guess course from filename (semi-automatic)
 │   ├── store.py            #   SQLite: schema / save / query / plan items
+│   ├── index.py            #   Build the index: embed text, detect stale rows that need re-embedding
 │   ├── search.py           #   Three retrievers (filename / TF-IDF / semantic) + hybrid search
 │   ├── cluster.py          #   Hierarchical clustering of similar files
 │   └── plan.py             #   Cleanup plan: generate / confirm / export

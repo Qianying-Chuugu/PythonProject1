@@ -17,7 +17,7 @@
 
 ### 基础设施
 - [x] 项目骨架与模块划分（核心包 + Streamlit 壳分离）
-- [~] SQLite 表结构（已做 files / plan_items / courses；tags / chunks 未做）
+- [~] SQLite 表结构（已做 files / plan_items / courses / chunks；tags / file_tags 未做）
 - [ ] 日志与可复现性（固定随机种子）
 
 ### 文本提取
@@ -34,16 +34,20 @@
 - [~] 建议值与用户修正分开落库（课程已做 suggested_course_id / course_id；标签未做）
 
 ### 向量与索引
-- [x] 文档级向量（用于聚类与语义检索；已持久化到 `files.embedding`）
+- [x] 文档级向量（用于聚类；已持久化到 `files.embedding`）
+- [x] 段落级向量（用于语义检索；`chunk.py` 切段 + 持久化到 `chunks.embedding`）
 - [x] 向量持久化与「过期重算」判断（正文变了 / 换模型 → 自动重算，见 DESIGN.md）
 - [ ] 固定模型缓存路径（模型已由 sentence-transformers 默认缓存，离线可用；未显式固定路径）
-- [ ] 段落级向量（用于语义搜索；现在语义检索暂时也是用文档级向量）
+- [ ] **换区分度更强的中文模型**（如 BGE 系列）。实测 text2vec 在这个语料上分数压缩得厉害：
+      不相关段落能到 0.54，正确答案 0.65~0.77，中间只隔 0.1，单靠阈值分不干净
+- [ ] 段落向量的向量索引（现在每次检索都把全库段落读进内存算余弦；几百~几千段够用，
+      上万段就该换 FAISS 之类）
 
 ### 检索
 - [ ] 统一检索接口抽象（Retriever）
 - [x] 文件名关键词检索
 - [x] 正文关键词检索（TF-IDF；BM25 未做）
-- [x] 语义检索
+- [x] 语义检索（按段落匹配；同一文件取最好的 3 段平均当文件分，见 DESIGN.md）
 - [x] 混合检索与「匹配原因」输出
 
 ### 聚类
@@ -63,6 +67,7 @@
 - [x] 新手教程 `tutorial.md`（Python 语法，已到第九课 + 综合练习）
 
 ### 测试
-- [x] pytest 覆盖核心模块（extract / classify / course / store / search / cluster / plan / index 共 8 个；
-      涉及向量模型的路径用假模型 / 假函数替掉，测试不联网、不下载模型）
-- [ ] 语义检索 `search_semantic` 的真实路径（需要加载模型）目前没有测试
+- [x] pytest 覆盖核心模块（extract / chunk / classify / course / store / search / cluster / plan / index
+      共 9 个；涉及向量模型的路径用假模型 / 假函数替掉，测试不联网、不下载模型）
+- [ ] 真实模型的端到端检索测试（要加载模型 + 下载权重，不适合放进默认测试集；
+      目前靠手工实测覆盖，`min_score` 就是那样量出来的，见 DESIGN.md）

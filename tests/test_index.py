@@ -134,4 +134,72 @@ def test_导入并建索引(tmp_path, monkeypatch):
     n = index.import_and_index(str(src), db)
 
     assert n == 2
-    assert len(store.list_file_vectors(db)) == 2     # 导入完立刻就能用上
+    assert len(store.list_file_vectors(db)) == 2     # 文档向量（聚类用），导入完立刻就能用上
+    assert len(store.list_chunk_vectors(db)) == 2    # 段落向量（检索用）也一样
+
+
+# ---------- 段落级向量：ensure_chunk_embeddings ----------
+
+def test_切段并算好段落向量(tmp_path, monkeypatch):
+    db = _建库(tmp_path)
+    _存一个文件(db, "a.txt", "第一段。\n\n第二段。")
+
+    monkeypatch.setattr(index, "get_model", lambda: _假模型())
+
+    assert index.ensure_chunk_embeddings(db) == (1, 2)   # 切了 1 篇，算了 2 段
+    # 段号从 1 开始，而且顺序就是原文顺序
+    assert [r[2] for r in store.list_chunk_vectors(db)] == [1, 2]
+
+
+def test_切过的文件不会重复切(tmp_path, monkeypatch):
+    db = _建库(tmp_path)
+    _存一个文件(db, "a.txt", "第一段。\n\n第二段。")
+
+    假模型 = _假模型()
+    monkeypatch.setattr(index, "get_model", lambda: 假模型)
+    index.ensure_chunk_embeddings(db)
+
+    # 再跑一次：段落都切好了、向量也都在 → 一件都不用做
+    assert index.ensure_chunk_embeddings(db) == (0, 0)
+    assert 假模型.调用次数 == 1                        # 模型都没被碰过
+
+
+def test_正文变了段落会重切(tmp_path, monkeypatch):
+    db = _建库(tmp_path)
+    _存一个文件(db, "a.txt", "第一段。\n\n第二段。")
+
+    monkeypatch.setattr(index, "get_model", lambda: _假模型())
+    index.ensure_chunk_embeddings(db)
+    assert len(store.list_chunk_vectors(db)) == 2
+
+    _存一个文件(db, "a.txt", "改成只有一段了。")      # 正文改了
+
+    # save_file 应该已经把按旧正文切出来的段落整批删掉了
+    assert store.list_chunk_vectors(db) == []
+
+    # 重新切、重新算：新正文只有一个自然段
+    assert index.ensure_chunk_embeddings(db) == (1, 1)
+    assert [r[3] for r in store.list_chunk_vectors(db)] == ["改成只有一段了。"]
+
+
+def test_换了模型段落向量全部重算(tmp_path, monkeypatch):
+    db = _建库(tmp_path)
+    _存一个文件(db, "a.txt", "第一段。\n\n第二段。")
+
+    monkeypatch.setattr(index, "get_model", lambda: _假模型())
+    index.ensure_chunk_embeddings(db)
+
+    monkeypatch.setattr(index, "MODEL_NAME", "另一个模型")
+
+    # 段落本身不用重切（0 篇），但向量是旧模型算的，两段都要重算
+    assert index.ensure_chunk_embeddings(db) == (0, 2)
+
+
+def test_正文是空的文件不切段(tmp_path, monkeypatch):
+    db = _建库(tmp_path)
+    _存一个文件(db, "扫描件.pdf", "   \n  ")     # 模拟扫描件：提取出来没有文字
+
+    monkeypatch.setattr(index, "get_model", lambda: _假模型())
+
+    assert index.ensure_chunk_embeddings(db) == (0, 0)    # 没内容可切，也不算向量
+    assert store.list_chunk_vectors(db) == []

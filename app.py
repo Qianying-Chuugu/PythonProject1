@@ -21,9 +21,10 @@ store.init_db()   # 确保表存在（第一次运行会建表）
 # 启动时补一次索引：老库（这次改动之前导入的文件没有向量）靠这一步自动补上。
 # 没有过期的就什么都不做，也不会下载模型（库是空的 / 向量都在 → 直接返回）。
 with st.spinner("检查索引…"):
-    _n = index.ensure_embeddings()
-if _n:
-    st.info(f"为 {_n} 个文件新建了向量索引")
+    _n_doc = index.ensure_embeddings()                  # 文档级向量（聚类用）
+    _n_cut, _n_chunk = index.ensure_chunk_embeddings()  # 段落级向量（检索用）
+if _n_doc or _n_cut or _n_chunk:
+    st.info(f"补建索引：文档向量 {_n_doc} 个；{_n_cut} 篇文件切出 {_n_chunk} 段并算好向量")
 
 st.header("文件库")
 rows = store.list_files()          # [(id, path, title, doc_type), ...]
@@ -58,8 +59,8 @@ if kw_query:
     else:
         st.warning("没有匹配的文件")
 
-st.header("语义搜索")
-sem_query = st.text_input("用自然语言描述要找的内容", placeholder="比如「讲过背包问题的资料」")
+st.header("语义搜索（按段落匹配）")
+sem_query = st.text_input("用自然语言描述要找的内容", placeholder="比如「背包问题的状态转移方程怎么写的」")
 if sem_query:
     sem_results = search_semantic(sem_query)
     if sem_results:

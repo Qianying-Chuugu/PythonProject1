@@ -42,6 +42,21 @@ def init_db(db_path=_DB_PATH):  #建表SQL
             status TEXT NOT NULL DEFAULT 'pending'
         )
     """)  #整理方案：一行一条建议，files 存建议归并的文件标题
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS chunks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_id INTEGER NOT NULL,
+            seq INTEGER NOT NULL,
+            text TEXT NOT NULL,
+            embedding BLOB,
+            embedding_model TEXT,
+            UNIQUE (file_id, seq)
+        )
+    """)  #段落表：一篇文章切成的若干段，每段一行
+    #      file_id 指向 files.id（和 files.course_id 一样，只记关系不建外键约束）；
+    #      seq 是段落在原文里的顺序，从 1 开始（这个号是给人看的「第几段」）；
+    #      UNIQUE(file_id, seq) 保证同一文件里不会有重复段号。
+    #      后两列和 files 表完全对称，过期判断用的是同一套办法（见 index.py）。
     # 给老库补上后加的列。注意：表已经存在时，CREATE TABLE IF NOT EXISTS 不会加列，
     # 所以老数据库（studyorganizer.db）得用 ALTER TABLE 补，否则会报"no such column"。
     existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(files)")}  # 现在有哪些列
@@ -64,6 +79,12 @@ def save_file(info, db_path=_DB_PATH):
     （doc_type、is_scanned、suggested_course_id 可选，没有就存 NULL）
     """
     conn = sqlite3.connect(db_path)
+
+    # 先看一眼这个路径存过没有、正文跟之前一不一样——用来判断段落要不要作废。
+    row = conn.execute("SELECT id, text FROM files WHERE path = ?", (info["path"],)).fetchone()
+    old_id = row[0] if row else None
+    text_changed = row is not None and row[1] != info["text"]
+
     # 用 ON CONFLICT DO UPDATE（不是 INSERT OR REPLACE）。
     # REPLACE 是先删旧行再插新行，没列出的 course_id（用户确认值）会被抹成 NULL；
     # DO UPDATE 只改下面列出的这几列，course_id 原样保留，符合 D-012。
@@ -87,6 +108,13 @@ def save_file(info, db_path=_DB_PATH):
         (info["path"], info["title"], info.get("doc_type"), info["text"],
          1 if info.get("is_scanned") else 0, info.get("suggested_course_id")),
     )
+
+    if text_changed:
+        # 正文变了，按旧正文切出来的段就全不作数了——整批删掉，
+        # 等 index.ensure_chunk_embeddings() 拿新正文重新切、重新算。
+        # 这样「换个切法重来」也不需要写迁移代码，删掉重导即可。
+        conn.execute("DELETE FROM chunks WHERE file_id = ?", (old_id,))
+
     conn.commit()
     conn.close()
 
@@ -224,6 +252,84 @@ def save_embedding(file_id, embedding_blob, model_name, db_path=_DB_PATH):
     )
     conn.commit()
     conn.close()
+
+
+def save_chunks(file_id, chunks, db_path=_DB_PATH):
+    """把切好的段落存进库（先把这个文件的旧段落全删掉，再按顺序重存一遍）。
+
+    参数 chunks：chunk.chunk_text() 切出来的字符串列表，顺序就是原文顺序。
+    """
+    conn = sqlite3.connect(db_path)
+    conn.execute("DELETE FROM chunks WHERE file_id = ?", (file_id,))
+    conn.executemany(
+        "INSERT INTO chunks (file_id, seq, text) VALUES (?, ?, ?)",
+        # seq 从 1 开始：这个号是给人看的「第几段」，从头读起来顺一点
+        [(file_id, seq, text) for seq, text in enumerate(chunks, start=1)],
+    )
+    conn.commit()
+    conn.close()
+
+
+def list_files_without_chunks(db_path=_DB_PATH):
+    """返回还没切过段的文件 (id, text)，供 index 切段入库。
+
+    正文是空的（比如扫描件）就没有段落可切，直接跳过。
+    """
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute(
+        "SELECT id, text FROM files"
+        " WHERE id NOT IN (SELECT file_id FROM chunks)"
+    ).fetchall()
+    conn.close()
+    # 空正文的判断放在 Python 里做，不要写成 SQL 的 trim(text) != ''——
+    # SQLite 的 trim() 默认只去**空格**，不去换行和制表符，
+    # 于是"只有几个换行"的正文会被当成有内容，每次都被拎出来重切一遍
+    # （而重切又切不出任何段，永远轮不到它被标记成"切过了"）。
+    # Python 的 str.strip() 去的才是全部空白字符。
+    return [(file_id, text) for file_id, text in rows if text and text.strip()]
+
+
+def list_chunks_needing_embedding(model_name, db_path=_DB_PATH):
+    """返回向量需要重算的段落 (id, text)。
+
+    判断和 list_files_needing_embedding 一模一样——段落向量和文档向量
+    用同一个模型，过期规则自然也一样。
+    """
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute(
+        "SELECT id, text FROM chunks"
+        " WHERE embedding IS NULL OR embedding_model IS NOT ?",
+        (model_name,),
+    ).fetchall()
+    conn.close()
+    return rows
+
+
+def save_chunk_embedding(chunk_id, embedding_blob, model_name, db_path=_DB_PATH):
+    """把算好的段落向量写回这一行。"""
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "UPDATE chunks SET embedding = ?, embedding_model = ? WHERE id = ?",
+        (embedding_blob, model_name, chunk_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def list_chunk_vectors(db_path=_DB_PATH):
+    """返回有向量的段落 (file_id, 文件标题, 段号, 段落正文, embedding)。
+
+    要连文件标题一起取：检索结果最终是按「文件」呈现的，
+    但得知道每一段属于哪个文件，才能把同文件的段落分数合成一个文件分。
+    """
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute(
+        "SELECT c.file_id, f.title, c.seq, c.text, c.embedding"
+        " FROM chunks c JOIN files f ON f.id = c.file_id"
+        " WHERE c.embedding IS NOT NULL"
+    ).fetchall()
+    conn.close()
+    return rows
 
 
 def add_plan_item(action, files, reason, db_path=_DB_PATH):

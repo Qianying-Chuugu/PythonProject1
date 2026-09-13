@@ -10,7 +10,7 @@
 app.py            # Streamlit 入口（薄，只做展示与交互）
   └── 调用 ↓
 studyorganizer/   # 核心包（纯逻辑，可独立测试）
-  extract/ classify/ course/ store/ search/ cluster/ plan/ index/
+  extract/ chunk/ classify/ course/ store/ search/ cluster/ plan/ index/
 ```
 
 ## 模块划分
@@ -18,6 +18,7 @@ studyorganizer/   # 核心包（纯逻辑，可独立测试）
 | 模块 | 职责 |
 | --- | --- |
 | extract | 文本 / 标题 / 元信息提取（pdf / txt / md） |
+| chunk | 把正文切成一段一段（自然段 + 超长段二次切）；纯函数 |
 | classify | 规则分类：判断资料类型 |
 | course | 从文件名猜课程归属（半自动，规则打底） |
 | store | SQLite 读写（files / courses / plan_items 三张表） |
@@ -33,13 +34,18 @@ studyorganizer/   # 核心包（纯逻辑，可独立测试）
   → extract   提取标题/正文/元信息
   → classify  判断资料类型
   → store     存入 files 表
-  → index     把正文算成向量写进 files.embedding（很贵，所以算一次存起来）
+  → index     ① 文档向量 → files.embedding（聚类用）
+              ② 切段 chunk.chunk_text() → chunks 表
+              ③ 段落向量 → chunks.embedding（检索用）
+              （向量很贵，所以算一次存起来，过期才重算）
 
 检索：
   自然语言 query
   → search    三种方法：标题关键词 / 正文关键词（TF-IDF）/ 语义向量
-              各自归一化后加权 → 混合检索，结果附带「匹配原因」
-              （语义向量从库里读，不现算）
+              语义那一路是**按段落**比：每段算相似度 → 丢掉低于 min_score 的
+              → 按文件分组，取最好的前 3 段平均当文件分
+              三种方法各自归一化后加权 → 混合检索，结果附带「匹配原因」
+              （向量从库里读，不现算）
 
 聚类与整理：
   → cluster   内容相近的文件归组
@@ -77,25 +83,70 @@ class Hit:
 ## 重要设计
 
 ### 向量分块：两种粒度、两种用途
-- **文档级向量** → 聚类（判断「这些资料是否主题相近」），目前语义检索也用它。
-- **段落级向量** → 语义搜索（判断「这段话回答了用户问什么」），命中后映射回文件。**尚未实现**。
-- 原因：长文档整篇压成一个向量会稀释语义、检索不准。
+- **文档级向量** → `files.embedding`，聚类用（判断「这些资料是否主题相近」）。
+- **段落级向量** → `chunks.embedding`，语义检索用（判断「这段话回答了用户问什么」），
+  命中后映射回文件。
+- 原因：长文档整篇压成一个向量会把细节"平均"掉——一篇 30 页的讲义里只有一段讲了
+  背包问题，整篇的向量跟"背包问题"并不像，整篇算就搜不到。
+
+两种向量**分开算、各管各的**。不用「段落向量的平均值」代替文档向量，因为那样
+聚类结果就会随切段参数变化（改个切段长度，聚类就变了），把两件无关的事耦合在一起。
+
+### 切段：先按自然段，太长的再按字数切
+`chunk.chunk_text()`，两层：
+
+1. **按空行切自然段。** 注意单个换行**不算**分段——原文里一个换行往往只是
+   "一行排不下"的显示折行（PDF 更是每一视觉行一个换行），所以段内的单换行要拼回去，
+   否则会从句子中间切断，命中片段读起来是半截话。
+2. **某段超过 300 字，再按字数滑窗切**，相邻块重叠 50 字（免得答案正好压在切口上）。
+
+第 2 步**主要是给 PDF 准备的**。实测（`practice/操作系统_进程调度长讲义.pdf`）：
+PDF 提取出来"空行只出现在页与页之间"，所以一"段"其实是一整页（380~410 字），
+不二次切就等于没切。
+
+### 检索结果怎么从段落合成到文件
+结果列表里显示的还是**文件**（用户要打开的是文件，不是某个段落），所以要合成：
+
+1. 先丢掉相似度低于 `min_score` 的段落；
+2. 再按文件分组，取该文件**最好的前 3 段求平均**。
+
+取平均而不是取最高分：既奖励"有一段特别准"，也奖励"好几段都相关"，而且不像取最高分
+那样偏向段落多的长文档（段落多，蒙中高分的机会就多）。
+
+> **`min_score` 默认 0.45 是实测出来的，不是拍脑袋定的。** 在 `practice/` 语料上量过：
+> text2vec 给出的相似度挤在很窄的区间里——跟查询**无关**的段落也能到 0.45~0.54，
+> 而正确答案大约 0.65~0.77，中间只隔 0.1。用原来的 0.3 时 99% 的段落都能过关，
+> 等于没过滤。取 0.45 能砍掉明显跑题的尾部，又不会误伤"写得不一样但确实相关"的段落。
+>
+> 反过来也要知道它的局限：**阈值只能砍尾部，分不出细微好坏**，真正决定顺序的是排序。
+> 想彻底解决得换区分度更强的中文模型（见 ROADMAP）。
 
 ### 向量只算一遍：算完存库，过期才重算
-文档级向量算一次要过模型，很贵。所以算完就写进 `files.embedding`，
-`search_semantic` 和 `cluster_files` 都从库里读，不现算。
+向量算一次要过模型，很贵。所以算完就写进库里，检索和聚类都从库里读，不现算。
 
-「哪些行的向量已经不算数了」收敛成同一条查询（`store.list_files_needing_embedding`）：
+`files` 和 `chunks` 两张表的结构是对称的（都有 `embedding` + `embedding_model`），
+过期规则也完全一样，收敛成同一条查询：
+
 1. `embedding IS NULL` —— 还没算过，或者正文变了被清空；
 2. `embedding_model` 和当前模型名对不上 —— 换模型了，旧向量不在同一个空间里，比对没有意义；
 3. 文件正文变了 —— `save_file` 的 upsert 里用
    `CASE WHEN files.text IS excluded.text THEN files.embedding ELSE NULL END`
-   把向量清成 NULL，等于插一面「这行过期了」的旗子。
+   把向量清成 NULL，等于插一面「这行过期了」的旗子；段落那边则是把这文件的
+   chunks **整批删掉**，下次重新切、重新算。
 
 这样「换模型」不用写任何特殊代码：所有行都不满足条件，自然全部重算。
+「换个切段长度重来」也不用写迁移，删掉重导即可。
 
-依赖方向：`index → store, search`。store 和 search 都**不**依赖 index，
+依赖方向：`index → store, search, chunk`。store / search / chunk 都**不**依赖 index，
 所以建索引只能从 `index` 或界面层触发，`search` 内部不能反过来调它（会循环导入）。
+`chunk` 更是谁的依赖都不欠——纯字符串进、纯列表出。
+
+### 一个已知的接口不整齐处
+`store` 的函数都收 `db_path` 参数，但 `search` / `cluster` / `plan` 的函数不收，
+它们固定用 `store._DB_PATH`（相对的 `studyorganizer.db`）。
+所以想对「另一个库」做检索，只能换工作目录，不能传参。
+测试里是靠 monkeypatch 掉 `store` 的读取函数绕过去的。以后要在界面上支持多库，
+得先把 `db_path` 一路透传下去。
 
 ### 检索的「匹配原因」（可解释性 = 项目灵魂）
 每个结果附带 `reasons`，标明命中的方法、命中的内容与片段。
@@ -119,9 +170,13 @@ class Hit:
 
 ## 数据模型（SQLite 草案）
 
-> 注意：下面是**完整设计草案**。v0.1 已实现 `files` / `plan_items` / `courses` 三张表
-> （`files` 已加 `suggested_course_id` / `course_id`，见 D-012，另有 `is_scanned` /
-> `embedding` / `embedding_model`），其余（tags / file_tags / chunks）是后续设计，尚未实现。
+> 注意：下面是**完整设计草案**。v0.1 已实现 `files` / `plan_items` / `courses` / `chunks`
+> 四张表（`files` 已加 `suggested_course_id` / `course_id`，见 D-012，另有 `is_scanned` /
+> `embedding` / `embedding_model`；`chunks` 见上文「切段」一节），
+> 其余（tags / file_tags）是后续设计，尚未实现。
+>
+> `chunks.file_id` 实际**没有**建外键约束，只记关系——和 `files.course_id` 的写法保持一致
+> （SQLite 的外键默认不生效，要每次连接都 `PRAGMA foreign_keys=ON` 才管用）。
 >
 > **实际建表 SQL 以 `studyorganizer/store.py` 的 `init_db()` 为准。** 上面的 `files`
 > 草案里，`filename` / `size_bytes` / `mtime` / `review_status` / `imported_at` /
@@ -191,3 +246,7 @@ CREATE TABLE plan_items (
 
 > 注：段落向量存 SQLite BLOB 足以应对几百~几千文件规模（numpy 加载进内存做余弦）；
 > 后续规模扩大可换 FAISS / 独立向量库，接口不变。
+>
+> 但要知道现在的做法是**每次检索都把全库段落向量读进内存**再算余弦。
+> `practice/` 22 个文件切出 141 段，跑起来是毫秒级，完全够用；
+> 等到几万段、或者要在 Streamlit 每次重跑里做这件事，就该换向量索引了。
