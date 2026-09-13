@@ -98,8 +98,9 @@ class Hit:
 
 ## 数据模型（SQLite 草案）
 
-> 注意：下面是**完整设计草案**。v0.1 只实现了 `files` 和 `plan_items` 两张表（且字段有简化），
-> 其余（courses / tags / file_tags / chunks / suggested_* 等）是后续设计，尚未实现。
+> 注意：下面是**完整设计草案**。v0.1 已实现 `files` / `plan_items` / `courses` 三张表
+> （`files` 已加 `suggested_course_id` / `course_id`，见 D-012），
+> 其余（tags / file_tags / chunks）是后续设计，尚未实现。
 
 ```sql
 -- 课程

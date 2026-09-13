@@ -17,7 +17,7 @@
 
 ### 基础设施
 - [x] 项目骨架与模块划分（核心包 + Streamlit 壳分离）
-- [~] SQLite 表结构（已做 files + plan_items 简化表；courses / tags / chunks 未做）
+- [~] SQLite 表结构（已做 files / plan_items / courses；tags / chunks 未做）
 - [ ] 日志与可复现性（固定随机种子）
 
 ### 文本提取
@@ -29,9 +29,9 @@
 ### 分类
 - [ ] 统一分类接口抽象（TypeClassifier）
 - [x] 规则分类器（讲义 / 作业 / 试卷 / 笔记 / 实验报告）
-- [ ] 课程候选建议（CourseSuggester，半自动）
-- [ ] 用户改标签 → 回写数据库
-- [ ] 建议值与用户修正分开落库（供准确率统计与后续 ML 训练）
+- [x] 课程候选建议（CourseSuggester，半自动；规则打底：从文件名抽课程名）
+- [~] 用户修改 → 回写数据库（课程已做；标签未做）
+- [~] 建议值与用户修正分开落库（课程已做 suggested_course_id / course_id；标签未做）
 
 ### 向量与索引
 - [x] 文档级向量（用于聚类；现算现用，未持久化）

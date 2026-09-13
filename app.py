@@ -75,6 +75,36 @@ if hyb_query:
     else:
         st.warning("没有匹配的文件")
 
+st.header("课程归属")
+
+file_courses = store.list_files_with_course()   # [(id, 标题, 建议课程, 已确认课程), ...]
+courses = store.list_courses()                  # [(id, 课程名), ...]
+name_to_id = {name: cid for cid, name in courses}   # 课程名 → id 的对照表
+_UNSET = "（未指定）"
+options = [_UNSET] + list(name_to_id)           # 下拉框选项
+
+if not courses:
+    st.info("还没有课程，先去左边导入资料（导入时会自动猜课程）")
+else:
+    for fid, title, suggested, confirmed in file_courses:
+        c1, c2, c3 = st.columns([4, 3, 1])
+        c1.write(f"**{title}**")
+        if confirmed:
+            c2.write(f"✓ 已确认：{confirmed}")        # 确认过的不再给下拉框
+        else:
+            default = suggested if suggested in name_to_id else _UNSET
+            picked = c2.selectbox(
+                f"课程_{fid}", options,
+                index=options.index(default),          # 默认选中系统建议的课程
+                key=f"pick_{fid}", label_visibility="collapsed",
+            )
+            if c3.button("确认", key=f"ok_{fid}"):
+                if picked == _UNSET:
+                    st.warning("请先选一门课")
+                else:
+                    store.set_file_course(fid, name_to_id[picked])
+                    st.rerun()
+
 st.header("整理方案")
 
 if st.button("生成整理方案"):
