@@ -46,8 +46,9 @@
 - 内容相近的文件自动聚类 → 生成整理方案 → 用户确认 → 导出报告
 - Streamlit 界面 + SQLite 持久化
 - 向量模型是在示例语料上**实测选出来**的，不是拍脑袋：`BAAI/bge-small-zh-v1.5`
-  （6 条查询里旧模型只有 4 条把答案排在第一，它 6 条全对；放行率 49% → 27%，
-  体积和耗时都只有 1/4。对照数据在 [DESIGN.md](DESIGN.md)，
+  （21 条带标准答案的查询里，旧模型只有 15 条把答案排在第一，它 21 条全对；
+  体积和耗时都只有 1/4。更有意思的是更大的 `bge-base` **排序反而更差**（20/21）——
+  更大不等于更准。对照数据在 [DESIGN.md](DESIGN.md)，
   **可以用 `python tools/benchmark.py --model 模型名` 自己重跑**）
 
 **还没做**（正在做的，都在 [ROADMAP.md](ROADMAP.md) 里）：
@@ -57,7 +58,8 @@
 - 统一接口抽象（`TypeClassifier` / `Retriever`，为将来换实现做准备）
 - BM25、标签系统、文件重命名建议
 - 真实模型的端到端检索测试没进默认测试集（要下载模型，跑起来太慢）——
-  改成了手动跑 `tools/benchmark.py`，见 [DESIGN.md](DESIGN.md)「可复现性」
+  改成了手动跑 `tools/benchmark.py`；加 `--check` 会断言"21 条查询的标准答案
+  必须都排第一"，不过就以非 0 退出。见 [DESIGN.md](DESIGN.md)「可复现性」
 
 > ⚠️ **项目还在开发中**，接口和数据结构都可能变。现在跟上的话，你能看着它一点点长完。
 
@@ -244,8 +246,9 @@ gets written down right away.
 - Cluster similar files → suggest a cleanup plan → you confirm → export a report
 - Streamlit UI + SQLite storage
 - The embedding model was **picked by measurement**, not by vibes: `BAAI/bge-small-zh-v1.5`
-  (across 6 labeled queries the old model put the answer first only 4 times; this one gets
-  all 6. Pass rate 49% → 27%, and it's a quarter of the size and a quarter of the time.
+  (across 21 labeled queries the old model put the answer first only 15 times; this one gets
+  all 21, and it's a quarter of the size and a quarter of the time. The larger `bge-base`
+  is actually **worse at ranking** (20/21) — bigger isn't more accurate.
   Comparison table in [DESIGN.md](DESIGN.md) — **you can rerun it yourself with
   `python tools/benchmark.py --model <name>`**)
 
@@ -257,7 +260,8 @@ gets written down right away.
 - Unified interfaces (`TypeClassifier` / `Retriever`) to make implementations swappable
 - BM25, a tag system, rename suggestions
 - Real-model end-to-end retrieval tests aren't in the default suite (they'd have to
-  download the model, so they're too slow) — they're a manual run via `tools/benchmark.py`
+  download the model, so they're too slow) — they're a manual run via `tools/benchmark.py`,
+  and `--check` asserts that all 21 labeled answers rank first, exiting non-zero if not
   instead; see "Reproducibility" in [DESIGN.md](DESIGN.md)
 
 > ⚠️ **Work in progress.** APIs and data structures will change. If you start now,
