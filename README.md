@@ -46,16 +46,18 @@
 - 内容相近的文件自动聚类 → 生成整理方案 → 用户确认 → 导出报告
 - Streamlit 界面 + SQLite 持久化
 - 向量模型是在示例语料上**实测选出来**的，不是拍脑袋：`BAAI/bge-small-zh-v1.5`
-  （同样卡一个阈值，旧模型放行 74% 的段落、它只放行 31%，而且体积和耗时都只有 1/4。
-  对照数据在 [DESIGN.md](DESIGN.md)）
+  （6 条查询里旧模型只有 4 条把答案排在第一，它 6 条全对；放行率 49% → 27%，
+  体积和耗时都只有 1/4。对照数据在 [DESIGN.md](DESIGN.md)，
+  **可以用 `python tools/benchmark.py --model 模型名` 自己重跑**）
 
 **还没做**（正在做的，都在 [ROADMAP.md](ROADMAP.md) 里）：
 
-- 改成**相对阈值**：现在的相似度下限是绝对分数线，实测分不干净（相关段落最低 0.566、
-  不相关最高 0.653，区间重叠）
+- 改成**相对阈值**：现在的相似度下限是绝对分数线，实测分不干净——「0-1 背包的状态
+  转移方程」这条，不相关段落里最高的那个（0.766）比答案里最高的（0.750）还高
 - 统一接口抽象（`TypeClassifier` / `Retriever`，为将来换实现做准备）
 - BM25、标签系统、文件重命名建议
-- 真实模型的端到端检索测试没进默认测试集（要下载模型，跑起来太慢）
+- 真实模型的端到端检索测试没进默认测试集（要下载模型，跑起来太慢）——
+  改成了手动跑 `tools/benchmark.py`，见 [DESIGN.md](DESIGN.md)「可复现性」
 
 > ⚠️ **项目还在开发中**，接口和数据结构都可能变。现在跟上的话，你能看着它一点点长完。
 
@@ -167,6 +169,8 @@ StudyOrganizer-Python/
 │   ├── search.py           #   三种检索（标题关键词 / TF-IDF / 语义）+ 混合检索
 │   ├── cluster.py          #   层次聚类：把内容相近的文件归组
 │   └── plan.py             #   整理方案：生成 / 确认 / 导出报告
+├── tools/
+│   └── benchmark.py        #   检索实测脚本：标准答案排第几 / 阈值扫描（手动跑）
 ├── tests/                  # pytest 测试
 ├── tutorial.md             # Python 语法教程 ← 新手从这里开始
 ├── NOTES.md                # 开发笔记：踩过的坑
@@ -240,19 +244,21 @@ gets written down right away.
 - Cluster similar files → suggest a cleanup plan → you confirm → export a report
 - Streamlit UI + SQLite storage
 - The embedding model was **picked by measurement**, not by vibes: `BAAI/bge-small-zh-v1.5`
-  (at the same threshold the old model let 74% of paragraphs through; this one lets 31%
-  through — and it's a quarter of the size and a quarter of the time. Comparison table in
-  [DESIGN.md](DESIGN.md))
+  (across 6 labeled queries the old model put the answer first only 4 times; this one gets
+  all 6. Pass rate 49% → 27%, and it's a quarter of the size and a quarter of the time.
+  Comparison table in [DESIGN.md](DESIGN.md) — **you can rerun it yourself with
+  `python tools/benchmark.py --model <name>`**)
 
 **Not done yet** (tracked in [ROADMAP.md](ROADMAP.md)):
 
 - **A relative threshold**: today's cutoff is an absolute similarity score, and measurement
-  shows it can't separate cleanly (least-relevant correct paragraph 0.566, most-relevant
-  wrong paragraph 0.653 — the ranges overlap)
+  shows it can't separate cleanly — for "what's the 0-1 knapsack transition equation", the
+  best *wrong* paragraph scores higher than the best *correct* one (0.766 vs 0.750)
 - Unified interfaces (`TypeClassifier` / `Retriever`) to make implementations swappable
 - BM25, a tag system, rename suggestions
 - Real-model end-to-end retrieval tests aren't in the default suite (they'd have to
-  download the model, so they're too slow)
+  download the model, so they're too slow) — they're a manual run via `tools/benchmark.py`
+  instead; see "Reproducibility" in [DESIGN.md](DESIGN.md)
 
 > ⚠️ **Work in progress.** APIs and data structures will change. If you start now,
 > you get to watch it grow.
@@ -364,6 +370,8 @@ StudyOrganizer-Python/
 │   ├── search.py           #   Three retrievers (filename / TF-IDF / semantic) + hybrid search
 │   ├── cluster.py          #   Hierarchical clustering of similar files
 │   └── plan.py             #   Cleanup plan: generate / confirm / export
+├── tools/
+│   └── benchmark.py        #   Retrieval benchmark: answer rank / threshold sweep (manual run)
 ├── tests/                  # pytest
 ├── tutorial.md             # Python tutorial ← start here if you're new
 ├── NOTES.md                # Dev notes: pitfalls hit along the way
