@@ -21,9 +21,11 @@ def init_db(db_path=_DB_PATH):  #建表SQL
             title TEXT,
             doc_type TEXT,
             text TEXT,
-            is_scanned INTEGER DEFAULT 0
+            is_scanned INTEGER DEFAULT 0,
+            embedding BLOB,
+            embedding_model TEXT
         )
-    """)  #每行唯一一个编号,路径唯一,标题,正文,是否扫描件(默认0)
+    """)  #每行唯一一个编号,路径唯一,标题,正文,是否扫描件(默认0),向量,向量用的模型
     conn.execute("""
         CREATE TABLE IF NOT EXISTS courses (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,9 +45,14 @@ def init_db(db_path=_DB_PATH):  #建表SQL
     # 给老库补上后加的列。注意：表已经存在时，CREATE TABLE IF NOT EXISTS 不会加列，
     # 所以老数据库（studyorganizer.db）得用 ALTER TABLE 补，否则会报"no such column"。
     existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(files)")}  # 现在有哪些列
-    for col in ("suggested_course_id", "course_id"):
+    for col, col_type in (
+        ("suggested_course_id", "INTEGER"),
+        ("course_id", "INTEGER"),
+        ("embedding", "BLOB"),          # 文档级向量（存成字节），聚类和语义检索用
+        ("embedding_model", "TEXT"),    # 这行的向量是哪个模型算的，用来判断要不要重算
+    ):
         if col not in existing_cols:
-            conn.execute(f"ALTER TABLE files ADD COLUMN {col} INTEGER")
+            conn.execute(f"ALTER TABLE files ADD COLUMN {col} {col_type}")
     conn.commit()  #保存
     conn.close()  #关闭
 
@@ -69,7 +76,14 @@ def save_file(info, db_path=_DB_PATH):
         "   doc_type = excluded.doc_type,"
         "   text = excluded.text,"
         "   is_scanned = excluded.is_scanned,"
-        "   suggested_course_id = excluded.suggested_course_id",
+        "   suggested_course_id = excluded.suggested_course_id,"
+        # 正文没变 → 向量照旧留着（重复导入不会白白重算）；
+        # 正文变了 → 把向量和模型名一起清空，等于插一面「这行过期了」的旗子，
+        #            index.ensure_embeddings() 看到 NULL 就会重算它。
+        "   embedding = CASE WHEN files.text IS excluded.text"
+        "                    THEN files.embedding ELSE NULL END,"
+        "   embedding_model = CASE WHEN files.text IS excluded.text"
+        "                        THEN files.embedding_model ELSE NULL END",
         (info["path"], info["title"], info.get("doc_type"), info["text"],
          1 if info.get("is_scanned") else 0, info.get("suggested_course_id")),
     )
@@ -160,11 +174,56 @@ def search_files(keyword, db_path=_DB_PATH):
 
 
 def list_file_texts(db_path=_DB_PATH):
-    """返回所有文件的 (id, title, text)，供语义检索取正文用。"""
+    """返回所有文件的 (id, title, text)，供正文关键词检索取正文用。"""
     conn = sqlite3.connect(db_path)
     rows = conn.execute("SELECT id, title, text FROM files").fetchall()
     conn.close()
     return rows
+
+
+def list_file_vectors(db_path=_DB_PATH):
+    """返回已经有向量的文件 (id, title, embedding)，供语义检索和聚类用。
+
+    刻意不查 text：正文很大，而算余弦相似度只用得到向量。
+    """
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute(
+        "SELECT id, title, embedding FROM files WHERE embedding IS NOT NULL"
+    ).fetchall()
+    conn.close()
+    return rows
+
+
+def list_files_needing_embedding(model_name, db_path=_DB_PATH):
+    """返回向量需要重算的文件 (id, text)。
+
+    两种情况算「需要重算」：
+      - embedding 是 NULL：还没算过，或者正文变了被 save_file 清空了；
+      - embedding_model 和 model_name 对不上：模型换了，旧向量全不作数。
+    """
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute(
+        "SELECT id, text FROM files"
+        " WHERE embedding IS NULL OR embedding_model IS NOT ?",
+        (model_name,),
+    ).fetchall()
+    conn.close()
+    return rows
+
+
+def save_embedding(file_id, embedding_blob, model_name, db_path=_DB_PATH):
+    """把算好的向量写回这一行。
+
+    参数 embedding_blob：向量转成的字节（numpy 数组的 .tobytes()）。
+    参数 model_name：是哪个模型算的，将来靠它判断这行要不要重算。
+    """
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "UPDATE files SET embedding = ?, embedding_model = ? WHERE id = ?",
+        (embedding_blob, model_name, file_id),
+    )
+    conn.commit()
+    conn.close()
 
 
 def add_plan_item(action, files, reason, db_path=_DB_PATH):

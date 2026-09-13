@@ -2,11 +2,13 @@
 
 用层次聚类（AgglomerativeClustering），把语义相近的文件归到同一堆。
 这是"整理方案"的基础：同一堆的文件，将来建议放到一起。
+
+向量不用现算——直接从库里读 index 模块存好的那些，所以这里不需要模型。
 """
 
+import numpy as np
 from sklearn.cluster import AgglomerativeClustering
 from studyorganizer import store
-from studyorganizer.search import _get_model   # 复用语义检索的模型
 
 
 def cluster_files(threshold=0.3):
@@ -15,15 +17,14 @@ def cluster_files(threshold=0.3):
     参数 threshold：距离阈值，越大合并越狠、堆越少（余弦距离 0~1）。
     返回 {堆号: [标题列表], ...}
     """
-    rows = store.list_file_texts()
+    rows = store.list_file_vectors()
     if not rows:
-        return {}                           # 库是空的就直接返回，别白加载模型
+        return {}                           # 库是空的（或还没建索引）就直接返回
 
-    model = _get_model()
     titles = [r[1] for r in rows]
-    texts = [r[2] for r in rows]
+    # 和 search_semantic 一样：裸字节必须按当初的 float32 还原
+    vecs = np.vstack([np.frombuffer(r[2], dtype=np.float32) for r in rows])
 
-    vecs = model.encode(texts)
     labels = AgglomerativeClustering(
         n_clusters=None,           # 不限制堆数，让阈值决定
         distance_threshold=threshold,

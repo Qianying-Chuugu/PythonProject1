@@ -34,9 +34,10 @@
 - [~] 建议值与用户修正分开落库（课程已做 suggested_course_id / course_id；标签未做）
 
 ### 向量与索引
-- [x] 文档级向量（用于聚类；现算现用，未持久化）
-- [ ] 段落级向量（用于语义搜索）
-- [ ] 向量持久化与缓存（固定模型路径，离线可用）
+- [x] 文档级向量（用于聚类与语义检索；已持久化到 `files.embedding`）
+- [x] 向量持久化与「过期重算」判断（正文变了 / 换模型 → 自动重算，见 DESIGN.md）
+- [ ] 固定模型缓存路径（模型已由 sentence-transformers 默认缓存，离线可用；未显式固定路径）
+- [ ] 段落级向量（用于语义搜索；现在语义检索暂时也是用文档级向量）
 
 ### 检索
 - [ ] 统一检索接口抽象（Retriever）
@@ -62,6 +63,6 @@
 - [x] 新手教程 `tutorial.md`（Python 语法，已到第九课 + 综合练习）
 
 ### 测试
-- [x] pytest 覆盖核心模块（extract / classify / course / store / search / cluster / plan 共 7 个；
+- [x] pytest 覆盖核心模块（extract / classify / course / store / search / cluster / plan / index 共 8 个；
       涉及向量模型的路径用假模型 / 假函数替掉，测试不联网、不下载模型）
 - [ ] 语义检索 `search_semantic` 的真实路径（需要加载模型）目前没有测试

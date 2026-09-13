@@ -28,6 +28,15 @@
   （从文件名「课程名_内容」抽课程名）；导入时自动写 `files.suggested_course_id`
 - 界面新增「课程归属」区：逐条确认 / 修改最终课程，写入 `files.course_id`
 - `files` 表新增 `suggested_course_id` / `course_id` 两列，保留系统建议与用户修正（D-012）
+- 向量持久化：`files` 表新增 `embedding` / `embedding_model` 两列，向量算一次存库，
+  语义检索与聚类直接读，不再每次现算
+- 新增 `studyorganizer/index.py`：`ensure_embeddings()`（补算漏的 / 过期重算）与
+  `import_and_index()`（导入 + 建索引）
+- 向量过期的两种触发，判断统一成一条查询：正文变了（`save_file` 的 upsert 自动清空）、
+  换模型了（`embedding_model` 与当前模型名对不上）
+- 界面导入改用 `index.import_and_index`；启动时自动补一次索引，
+  升级前导入的老库不用手动重导
+- 新增 `tests/test_index.py`（6 个用例，覆盖上述四种过期情况 + 导入建索引）
 
 ### Fixed
 - 语义分数是 numpy `float32`，直接 `round` 后打印成长小数
@@ -40,3 +49,8 @@
 - 删除 README「第一版暂不做」小节。
 - 界面结构命名统一：入口 `app.py` + 组件目录 `ui/`（原 `app/` 易混淆，见 D-013）。
 - `init_db` 对已存在的老库自动 `ALTER TABLE` 补列（幂等，可反复调用）。
+- 语义检索 `search_semantic` 与聚类 `cluster_files` 改为读库里的向量，不再现算；
+  `cluster_files` 因此不再依赖向量模型。
+- `search.py` 的 `_get_model` / `_MODEL_NAME` 改为公开的 `get_model` / `MODEL_NAME`，
+  供 `index.py` 复用（私有名字跨模块用不合适）。
+- `requirements.txt` 补上 `numpy`（`search.py` / `cluster.py` / `index.py` 直接用它）。

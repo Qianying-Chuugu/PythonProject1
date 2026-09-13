@@ -1,42 +1,37 @@
 """测 cluster 模块：把内容相近的文件聚成组。
 
-这里用一个「假模型」代替真正的向量模型——真模型要下载几百 MB，
-测试不该干这个。反正聚类这步真正要测的是「拿到向量之后怎么分组」，
-向量从哪来无所谓。
+聚类用的向量是从数据库里读的（index 模块算好存进去的那种）。
+所以这里只要往「库」里塞几个假向量就够了——不用下载真模型，
+也不用真的建库（把 store.list_file_vectors 换成假函数即可）。
+
+这步真正要测的是「拿到向量之后怎么分组」，向量从哪来无所谓。
 """
+
+import numpy as np
 
 from studyorganizer import cluster, store
 
 
-class _假模型:
-    """假的向量模型：不发网络请求，按正文返回写死的向量。
+def _向量(*nums):
+    """把一串数字打包成数据库里存的那种字节（float32 的 .tobytes()）。
 
-    正文A 和正文B 给同一个方向（应该聚成一组），
-    正文C 给垂直方向（应该自己一组）。
+    注意 dtype 必须和 index.py 存的时候一致，写错不会报错，只会读出垃圾数字。
     """
-
-    _向量表 = {
-        "正文A": [1.0, 0.0],
-        "正文B": [1.0, 0.0],
-        "正文C": [0.0, 1.0],
-    }
-
-    def encode(self, texts):
-        return [self._向量表[t] for t in texts]
+    return np.array(nums, dtype=np.float32).tobytes()
 
 
 def test_内容相同的文件聚成一组(monkeypatch):
+    # 讲义A 和 讲义B 方向相同（应该聚成一组），笔记C 垂直（自己一组）
     rows = [
-        (1, "讲义A", "正文A"),
-        (2, "讲义B", "正文B"),
-        (3, "笔记C", "正文C"),
+        (1, "讲义A", _向量(1.0, 0.0)),
+        (2, "讲义B", _向量(1.0, 0.0)),
+        (3, "笔记C", _向量(0.0, 1.0)),
     ]
 
-    def fake_list_file_texts(db_path=store._DB_PATH):
+    def fake_list_file_vectors(db_path=store._DB_PATH):
         return rows
 
-    monkeypatch.setattr(store, "list_file_texts", fake_list_file_texts)
-    monkeypatch.setattr(cluster, "_get_model", lambda: _假模型())
+    monkeypatch.setattr(store, "list_file_vectors", fake_list_file_vectors)
 
     groups = cluster.cluster_files(threshold=0.3)
 
@@ -50,11 +45,11 @@ def test_内容相同的文件聚成一组(monkeypatch):
             assert sorted(titles) == ["讲义A", "讲义B"]
 
 
-def test_库里没文件时返回空字典(monkeypatch):
-    def fake_list_file_texts(db_path=store._DB_PATH):
+def test_库里没向量时返回空字典(monkeypatch):
+    def fake_list_file_vectors(db_path=store._DB_PATH):
         return []
 
-    monkeypatch.setattr(store, "list_file_texts", fake_list_file_texts)
-    monkeypatch.setattr(cluster, "_get_model", lambda: _假模型())
+    monkeypatch.setattr(store, "list_file_vectors", fake_list_file_vectors)
 
+    # 聚类现在根本用不到模型了，所以库空就直接返回，不需要额外兜底
     assert cluster.cluster_files() == {}

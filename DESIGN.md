@@ -10,7 +10,7 @@
 app.py            # Streamlit 入口（薄，只做展示与交互）
   └── 调用 ↓
 studyorganizer/   # 核心包（纯逻辑，可独立测试）
-  extract/ classify/ course/ store/ search/ cluster/ plan/
+  extract/ classify/ course/ store/ search/ cluster/ plan/ index/
 ```
 
 ## 模块划分
@@ -23,6 +23,7 @@ studyorganizer/   # 核心包（纯逻辑，可独立测试）
 | store | SQLite 读写（files / courses / plan_items 三张表） |
 | search | 三种检索（标题关键词 / 正文 TF-IDF / 语义向量）+ 混合检索 + 模型加载 |
 | cluster | 层次聚类：内容相近的文件归组 |
+| index | 建索引：把正文算成向量存进库里，并判断哪些行过期了要重算 |
 | plan | 生成 / 确认 / 导出整理方案 |
 
 ## 数据流
@@ -32,11 +33,13 @@ studyorganizer/   # 核心包（纯逻辑，可独立测试）
   → extract   提取标题/正文/元信息
   → classify  判断资料类型
   → store     存入 files 表
+  → index     把正文算成向量写进 files.embedding（很贵，所以算一次存起来）
 
 检索：
   自然语言 query
   → search    三种方法：标题关键词 / 正文关键词（TF-IDF）/ 语义向量
               各自归一化后加权 → 混合检索，结果附带「匹配原因」
+              （语义向量从库里读，不现算）
 
 聚类与整理：
   → cluster   内容相近的文件归组
@@ -74,9 +77,25 @@ class Hit:
 ## 重要设计
 
 ### 向量分块：两种粒度、两种用途
-- **文档级向量** → 聚类（判断「这些资料是否主题相近」）。
-- **段落级向量** → 语义搜索（判断「这段话回答了用户问什么」），命中后映射回文件。
+- **文档级向量** → 聚类（判断「这些资料是否主题相近」），目前语义检索也用它。
+- **段落级向量** → 语义搜索（判断「这段话回答了用户问什么」），命中后映射回文件。**尚未实现**。
 - 原因：长文档整篇压成一个向量会稀释语义、检索不准。
+
+### 向量只算一遍：算完存库，过期才重算
+文档级向量算一次要过模型，很贵。所以算完就写进 `files.embedding`，
+`search_semantic` 和 `cluster_files` 都从库里读，不现算。
+
+「哪些行的向量已经不算数了」收敛成同一条查询（`store.list_files_needing_embedding`）：
+1. `embedding IS NULL` —— 还没算过，或者正文变了被清空；
+2. `embedding_model` 和当前模型名对不上 —— 换模型了，旧向量不在同一个空间里，比对没有意义；
+3. 文件正文变了 —— `save_file` 的 upsert 里用
+   `CASE WHEN files.text IS excluded.text THEN files.embedding ELSE NULL END`
+   把向量清成 NULL，等于插一面「这行过期了」的旗子。
+
+这样「换模型」不用写任何特殊代码：所有行都不满足条件，自然全部重算。
+
+依赖方向：`index → store, search`。store 和 search 都**不**依赖 index，
+所以建索引只能从 `index` 或界面层触发，`search` 内部不能反过来调它（会循环导入）。
 
 ### 检索的「匹配原因」（可解释性 = 项目灵魂）
 每个结果附带 `reasons`，标明命中的方法、命中的内容与片段。
@@ -101,8 +120,8 @@ class Hit:
 ## 数据模型（SQLite 草案）
 
 > 注意：下面是**完整设计草案**。v0.1 已实现 `files` / `plan_items` / `courses` 三张表
-> （`files` 已加 `suggested_course_id` / `course_id`，见 D-012，另有 `is_scanned`），
-> 其余（tags / file_tags / chunks）是后续设计，尚未实现。
+> （`files` 已加 `suggested_course_id` / `course_id`，见 D-012，另有 `is_scanned` /
+> `embedding` / `embedding_model`），其余（tags / file_tags / chunks）是后续设计，尚未实现。
 >
 > **实际建表 SQL 以 `studyorganizer/store.py` 的 `init_db()` 为准。** 上面的 `files`
 > 草案里，`filename` / `size_bytes` / `mtime` / `review_status` / `imported_at` /
@@ -131,6 +150,8 @@ CREATE TABLE files (
     size_bytes INTEGER,
     mtime TEXT,
     text TEXT,                           -- 提取的正文全文
+    embedding BLOB,                      -- 文档级向量（numpy float32 的裸字节；聚类与语义检索用）
+    embedding_model TEXT,                -- 这行的向量是哪个模型算的；对不上就要重算
     imported_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

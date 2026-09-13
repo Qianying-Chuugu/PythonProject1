@@ -95,4 +95,46 @@ def _get_model():
 - 不用担心会变慢：`import` 有缓存，第二次执行几乎零开销。
 - 但别无脑用：轻量的库（`os`、`json`）放顶部更清楚。到处延迟导入会让人**看不出这个模块依赖什么**。
 
-**相关代码**：`studyorganizer/search.py` 的 `_get_model()`
+**相关代码**：`studyorganizer/search.py` 的 `_get_model()`（现已改名 `get_model()`）
+
+## 5. 循环导入：让「建索引」和「检索」互相看得见，但只准单向依赖
+
+**遇到的问题**
+- 做向量持久化时，需要有个地方回答「库里哪些文件的向量过期了」。
+- 直觉做法是写在 `search.py` 里（它本来就是管向量的），可算完向量要**存库**，
+  那就得 `import store`；而 `store.py` 的 `import_folder` 又想导入完顺手建索引，
+  于是要 `import search`——两边互相 import，转一圈回来了。
+
+**根本原因**
+- Python 导入一个模块时，会从头到尾执行它。A 执行到一半需要 B，
+  就去执行 B；B 执行到一半又需要 A，可 A 还没执行完（里面那个名字还不存在），
+  于是报 `ImportError: cannot import name ... (most likely due to a circular import)`。
+- 根子上是**职责没分清**：`store` 只该管「怎么存」，不该管「什么时候该建索引」。
+
+**解决方法（加第三个模块，把依赖捋成一条直线）**
+- 新建 `studyorganizer/index.py`，专门放「建索引」这件事：
+
+```
+index.py  →  store.py    （读要算的、写算完的）
+index.py  →  search.py   （借模型和模型名）
+
+store.py  →  不 import index，也不 import search
+search.py →  不 import index
+```
+
+- 关键点：**`index` 站上层，`store` 和 `search` 都待在下面。**
+  底下的模块不认识上面的模块，箭头就永远转不回起点，循环自然断了。
+- 为此把 `search.py` 的 `_get_model` / `_MODEL_NAME` 改成了公开的
+  `get_model` / `MODEL_NAME`——`_` 开头是「本模块内部用」的意思，
+  别的模块要用它，本来就该改成公开名字。
+
+**核心道理**
+- **两个模块互相 import，是「职责放错了」的信号，不是「import 写法不对」。**
+  先别研究怎么让它编过，先问：这件事到底该谁管？
+- 断循环的正经办法是**加一层**（谁依赖谁画成箭头，别绕圈），
+  不是把 import 挪进函数里藏起来——那只是把错误推迟到运行时，更难查。
+- 单向依赖还有个白送的好处：**谁也不能偷偷在建索引**。
+  要建索引只能从 `index` 或界面层调，看一眼 import 就全知道了。
+
+**相关代码**：`studyorganizer/index.py`（新建）、`studyorganizer/store.py` 的
+`list_files_needing_embedding()` / `save_embedding()`、`studyorganizer/search.py` 的 `get_model()`

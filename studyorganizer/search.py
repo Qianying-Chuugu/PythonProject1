@@ -5,21 +5,22 @@
 3. 混合检索：把上面几种（含标题关键词）各自归一化后加权合成一个总分。
 """
 
+import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from studyorganizer import store
 
-_MODEL_NAME = "shibing624/text2vec-base-chinese"
+MODEL_NAME = "shibing624/text2vec-base-chinese"   # index.py 也要用它判断向量有没有过期
 _model = None
 
-def _get_model():
+def get_model():
     """加载模型（第一次调用时才真正加载，之后复用）。"""
     global _model
     if _model is None:
         # 延迟导入：sentence_transformers 会连带拉进 torch，很重（光 import 就要好几秒）。
         # 写在函数里，只有真正要用模型时才付这笔开销。见 NOTES.md 第 4 条。
         from sentence_transformers import SentenceTransformer
-        _model = SentenceTransformer(_MODEL_NAME)
+        _model = SentenceTransformer(MODEL_NAME)
     return _model
 
 
@@ -29,16 +30,18 @@ def search_semantic(query, top_k=5, min_score=0.3):
     参数 min_score：相似度下限，低于它的直接丢掉（0~1，越大越严格）。
     返回 [(标题, 相似度, 原因), ...]，相似度从高到低。
     """
-    rows = store.list_file_texts()
+    rows = store.list_file_vectors()
     if not rows:
-        return []                           # 库是空的就直接返回，别白加载模型
+        return []                           # 库是空的（或还没建索引）就直接返回
 
-    model = _get_model()
     titles = [r[1] for r in rows]           # 所有标题
-    texts = [r[2] for r in rows]            # 所有正文
+    # 存进去的是裸字节（.tobytes()），取出来必须按当初的类型 float32 还原。
+    # 类型写错不会报错，只会读出一堆垃圾数字——所以这里和 index.py 的
+    # vector.tobytes() 必须一直保持一致。用 vstack 顺便拼成二维数组。
+    doc_vecs = np.vstack([np.frombuffer(r[2], dtype=np.float32) for r in rows])
 
-    query_vec = model.encode([query])       # 问题 → 向量
-    doc_vecs = model.encode(texts)          # 每篇正文 → 向量
+    model = get_model()
+    query_vec = model.encode([query])       # 问题 → 向量（查询词每次都要现算，没存过）
     scores = cosine_similarity(query_vec, doc_vecs)[0]  # 每篇的相似度 0-1,此处生成的余弦相似度只有一行
 
     pairs = [(t, s) for t, s in zip(titles, scores) if s >= min_score]  # 相似度太低 = 不相关，丢掉

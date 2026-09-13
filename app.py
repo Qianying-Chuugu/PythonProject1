@@ -1,5 +1,5 @@
 import streamlit as st
-from studyorganizer import store
+from studyorganizer import index, store
 from studyorganizer.search import search_semantic, search_keyword, search_hybrid
 from studyorganizer.plan import generate_plan, export_report
 
@@ -10,12 +10,20 @@ with st.sidebar:
     st.header("导入资料")
     folder = st.text_input("文件夹路径", "practice")
     if st.button("导入"):
-        store.init_db()
-        n = store.import_folder(folder)
-        st.success(f"导入了 {n} 个文件")
+        # 用 index 的入口，不用 store.import_folder——导入完顺手把向量也建好，
+        # 否则新导入的文件没有向量，语义检索会漏掉它们。
+        n = index.import_and_index(folder)
+        st.success(f"导入了 {n} 个文件（已建好索引）")
 
 # ---- 主区 ----
 store.init_db()   # 确保表存在（第一次运行会建表）
+
+# 启动时补一次索引：老库（这次改动之前导入的文件没有向量）靠这一步自动补上。
+# 没有过期的就什么都不做，也不会下载模型（库是空的 / 向量都在 → 直接返回）。
+with st.spinner("检查索引…"):
+    _n = index.ensure_embeddings()
+if _n:
+    st.info(f"为 {_n} 个文件新建了向量索引")
 
 st.header("文件库")
 rows = store.list_files()          # [(id, path, title, doc_type), ...]
