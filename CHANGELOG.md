@@ -49,6 +49,19 @@
   `test_search.py` 补 6 个「段落合成文件分」用例
 
 ### Fixed
+- **向量读取没有核对 `embedding_model`，会读出别的模型算的向量。**
+  `list_file_vectors` / `list_chunk_vectors` 原先只查 `embedding IS NOT NULL`。
+  正常路径上不会出事（`app.py` 启动时先跑完 `ensure_*` 才渲染搜索框），但换模型
+  要把全库重算几十秒，用户等不及 Ctrl-C 中断后，库里会混着两种模型的向量
+  （旧 768 维 / 新 512 维），`np.vstack` 直接崩
+  `ValueError: Incompatible dimension for X and Y matrices`。
+  现在两个读函数都带 `AND embedding_model IS ?`，只返回当前模型的向量，
+  口径和 `list_*_needing_embedding` 完全一致（写和读用同一个判断）。
+  `model_name` 是**必填参数**，从 `search` / `plan → cluster` 一路透传，
+  `app.py` 传 `search.MODEL_NAME`——忘了传会当场报错，不会悄悄退化成不过滤。
+  实测：中断状态下 `search_semantic` 不再崩，返回 0 条（暂时读不到），
+  `cluster_files` 正常，补跑 `ensure_chunk_embeddings()` 后检索结果与之前完全一致。
+  新增 `test_读向量时只认当前模型`（并用变异测试确认它不是空测试）。
 - 语义分数是 numpy `float32`，直接 `round` 后打印成长小数
   （如 `0.5419999957084656`），显示前先转 `float`
 - `save_file` 由 `INSERT OR REPLACE` 改为 `INSERT ... ON CONFLICT(path) DO UPDATE`：

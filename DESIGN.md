@@ -161,19 +161,32 @@ PDF 提取出来"空行只出现在页与页之间"，所以一"段"其实是一
 所以建索引只能从 `index` 或界面层触发，`search` 内部不能反过来调它（会循环导入）。
 `chunk` 更是谁的依赖都不欠——纯字符串进、纯列表出。
 
-### 一个已知的隐患：换模型换到一半被打断
-`store.list_file_vectors()` / `list_chunk_vectors()` 只查 `embedding IS NOT NULL`，
-**不核对 `embedding_model`**。正常路径上没问题——`app.py` 启动时先跑完 `ensure_*`
-才会渲染出搜索框，所以检索时库里的向量必然是同一个模型。
+### 读向量时也要核对 embedding_model
+`store.list_file_vectors(model_name)` / `list_chunk_vectors(model_name)` 都带
+`AND embedding_model IS ?`，只返回**当前模型**算的向量。
 
-但如果重算中途被中断（重算是几十秒的事，用户等不及 Ctrl-C 很正常），库里就会
-一半旧模型（768 维）、一半新模型（512 维）。这时 `np.vstack` 或
+为什么读的时候也要查这一列（而不只是写的时候标记过期）：不同模型的向量维度可能不一样
+（text2vec 768 维、bge-small 512 维）。库里真会出现两种并存的情况——换模型要把全库
+重算一遍，几十秒的事，用户等不及 Ctrl-C 就中断了。混着读出来，`np.vstack` 或
 `cosine_similarity` 会直接崩：
-`ValueError: Incompatible dimension for X and Y matrices: X.shape[1] == 512 while Y.shape[1] == 768`。
 
-不是静默出错（会响），而且**下次启动会自动重算补上**，所以是个自愈的小坑。
-但报错信息对新手不友好。要根治就让这两个读函数也按 `embedding_model` 过滤
-（口径和 `list_*_needing_embedding` 一致）。
+```
+ValueError: Incompatible dimension for X and Y matrices: X.shape[1] == 512 while Y.shape[1] == 768
+```
+
+加上过滤之后，这种半成品状态**不再是崩溃，只是"暂时读不到"**：`search_semantic`
+返回空列表，聚类照常（文档向量那一半已经重算完了）。补跑一次 `ensure_*` 就恢复正常
+——实测过：中断后 `search_semantic` 返回 0 条、`cluster_files` 分出 15 组不崩，
+补跑 `ensure_chunk_embeddings()` 后检索结果和之前完全一致。
+
+口径和 `list_*_needing_embedding(model_name, ...)` 是**同一个**：两边都只认
+「这行的模型名 == 当前模型名」。写和读用同一个判断，不会出现「写的时候作废了、
+读的时候又当成有效」的错位。
+
+>`model_name` 定为必填参数（不是默认 `None`），而且顺着
+>`search → store`、`plan → cluster → store` 一路透传，
+>`app.py` 传 `search.MODEL_NAME`。这样"忘了传"会当场报错，而不是悄悄退化成
+>不过滤。`index` 早就是这么做的，现在读的路径跟它对齐了。
 
 ### 一个已知的接口不整齐处
 `store` 的函数都收 `db_path` 参数，但 `search` / `cluster` / `plan` 的函数不收，

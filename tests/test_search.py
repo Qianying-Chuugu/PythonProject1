@@ -14,6 +14,7 @@ import pytest
 
 from studyorganizer import search, store
 from studyorganizer.search import (
+    MODEL_NAME,
     _normalize,
     search_hybrid,
     search_keyword,
@@ -141,12 +142,21 @@ def _假装库里有段落(monkeypatch, 段落):
         (i, 标题, 段号, f"第{段号}段的正文", _向量(相似度))
         for i, (标题, 段号, 相似度) in enumerate(段落, start=1)
     ]
-    monkeypatch.setattr(store, "list_chunk_vectors", lambda db_path=store._DB_PATH: rows)
+
+    def fake_list_chunk_vectors(model_name, db_path=store._DB_PATH):
+        # 顺便验证 search 真把当前模型名传下去了：库里可能残留别的模型的向量，
+        # 不过滤的话两种维度的向量会被拼到一起，余弦相似度直接崩。
+        assert model_name == MODEL_NAME
+        return rows
+
+    monkeypatch.setattr(store, "list_chunk_vectors", fake_list_chunk_vectors)
     monkeypatch.setattr(search, "get_model", lambda: _假语义模型())
 
 
 def test_语义检索_库里没有段落向量就返回空(monkeypatch):
-    monkeypatch.setattr(store, "list_chunk_vectors", lambda db_path=store._DB_PATH: [])
+    monkeypatch.setattr(
+        store, "list_chunk_vectors", lambda model_name, db_path=store._DB_PATH: []
+    )
 
     # 库是空的就直接返回，连模型都不该加载
     assert search_semantic("任意问题") == []

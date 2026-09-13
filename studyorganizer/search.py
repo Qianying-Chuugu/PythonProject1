@@ -51,7 +51,9 @@ def search_semantic(query, top_k=5, min_score=0.45):
     只有一段讲了背包问题，整篇的向量跟"背包问题"并不像，整篇算就搜不到；
     按段落算才能精确命中讲那段话的地方。
     """
-    rows = store.list_chunk_vectors()   # [(文件id, 标题, 段号, 段落正文, 向量), ...]
+    # 只要当前模型的段落向量：库里可能残留别的模型算的（换模型重算到一半被打断），
+    # 那些维度不一样，混进来一起算余弦会直接崩。
+    rows = store.list_chunk_vectors(MODEL_NAME)   # [(文件id, 标题, 段号, 段落正文, 向量), ...]
     if not rows:
         return []                       # 库是空的（或还没建索引）就直接返回
 

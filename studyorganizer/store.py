@@ -209,14 +209,22 @@ def list_file_texts(db_path=_DB_PATH):
     return rows
 
 
-def list_file_vectors(db_path=_DB_PATH):
-    """返回已经有向量的文件 (id, title, embedding)，供语义检索和聚类用。
+def list_file_vectors(model_name, db_path=_DB_PATH):
+    """返回**已经用当前模型**算好向量的文件 (id, title, embedding)，供语义检索和聚类用。
 
     刻意不查 text：正文很大，而算余弦相似度只用得到向量。
+
+    为什么必须按 model_name 过滤、而不是只查 `embedding IS NOT NULL`：
+    不同模型的向量维度可能不一样（旧模型 768 维、新模型 512 维），拼到一起算余弦
+    会直接崩（ValueError: Incompatible dimension）。而"库里混着两种模型"是真会发生的
+    ——换模型要把全库重算一遍，几十秒的事，用户等不及 Ctrl-C 就中断了。
+    口径和 list_files_needing_embedding 完全一致：只认「这行的模型名 == 当前模型名」。
     """
     conn = sqlite3.connect(db_path)
     rows = conn.execute(
-        "SELECT id, title, embedding FROM files WHERE embedding IS NOT NULL"
+        "SELECT id, title, embedding FROM files"
+        " WHERE embedding IS NOT NULL AND embedding_model IS ?",
+        (model_name,),
     ).fetchall()
     conn.close()
     return rows
@@ -316,17 +324,20 @@ def save_chunk_embedding(chunk_id, embedding_blob, model_name, db_path=_DB_PATH)
     conn.close()
 
 
-def list_chunk_vectors(db_path=_DB_PATH):
-    """返回有向量的段落 (file_id, 文件标题, 段号, 段落正文, embedding)。
+def list_chunk_vectors(model_name, db_path=_DB_PATH):
+    """返回**已经用当前模型**算好向量的段落 (file_id, 文件标题, 段号, 段落正文, embedding)。
 
     要连文件标题一起取：检索结果最终是按「文件」呈现的，
     但得知道每一段属于哪个文件，才能把同文件的段落分数合成一个文件分。
+
+    按 model_name 过滤的理由和 list_file_vectors 一模一样，见它的注释。
     """
     conn = sqlite3.connect(db_path)
     rows = conn.execute(
         "SELECT c.file_id, f.title, c.seq, c.text, c.embedding"
         " FROM chunks c JOIN files f ON f.id = c.file_id"
-        " WHERE c.embedding IS NOT NULL"
+        " WHERE c.embedding IS NOT NULL AND c.embedding_model IS ?",
+        (model_name,),
     ).fetchall()
     conn.close()
     return rows

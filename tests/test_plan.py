@@ -6,11 +6,14 @@
 
 from studyorganizer import plan, store
 
+_假模型 = "假模型"   # generate_plan 要把它透传给 cluster_files
+
 
 def test_生成方案_只有一个文件的组被跳过(monkeypatch):
     added = []
 
-    def fake_cluster_files(threshold=0.3):
+    def fake_cluster_files(model_name, threshold=0.3):
+        assert model_name == _假模型      # 确认名字一路传到了聚类那儿
         return {0: ["讲义A", "讲义B"], 1: ["孤零零的笔记"]}
 
     def fake_add_plan_item(action, files, reason, db_path=store._DB_PATH):
@@ -21,7 +24,7 @@ def test_生成方案_只有一个文件的组被跳过(monkeypatch):
     monkeypatch.setattr(store, "add_plan_item", fake_add_plan_item)
     monkeypatch.setattr(store, "list_plan_items", lambda db_path=store._DB_PATH: [])
 
-    plan.generate_plan()
+    plan.generate_plan(_假模型)
 
     # 只有 2 个文件的那组才值得「归并」；单个文件没得归并
     assert len(added) == 1
@@ -37,12 +40,12 @@ def test_生成方案_先清空旧建议再生成新的(monkeypatch):
     def fake_add_plan_item(action, files, reason, db_path=store._DB_PATH):
         order.append("新增")
 
-    monkeypatch.setattr(plan, "cluster_files", lambda threshold=0.3: {0: ["A", "B"]})
+    monkeypatch.setattr(plan, "cluster_files", lambda model_name, threshold=0.3: {0: ["A", "B"]})
     monkeypatch.setattr(store, "clear_plan_items", fake_clear_plan_items)
     monkeypatch.setattr(store, "add_plan_item", fake_add_plan_item)
     monkeypatch.setattr(store, "list_plan_items", lambda db_path=store._DB_PATH: [])
 
-    plan.generate_plan()
+    plan.generate_plan(_假模型)
 
     # 顺序很重要：不清掉旧的，重新生成就会出现重复建议
     assert order == ["清空", "新增"]

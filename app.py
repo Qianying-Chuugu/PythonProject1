@@ -1,6 +1,6 @@
 import streamlit as st
 from studyorganizer import index, store
-from studyorganizer.search import search_semantic, search_keyword, search_hybrid
+from studyorganizer.search import MODEL_NAME, search_semantic, search_keyword, search_hybrid
 from studyorganizer.plan import generate_plan, export_report
 
 st.title("📚 StudyOrganizer 课程资料整理")
@@ -117,7 +117,7 @@ else:
 st.header("整理方案")
 
 if st.button("生成整理方案"):
-    plan = generate_plan()
+    plan = generate_plan(MODEL_NAME)
     st.success(f"生成了 {len(plan)} 条建议")
     st.session_state["show_plan"] = True      # 记住"本会话点过生成"
 

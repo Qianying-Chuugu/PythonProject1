@@ -6,6 +6,8 @@
 只有模型是假的（真模型要下载几百 MB，测试不该干这个）。
 """
 
+import sqlite3
+
 import numpy as np
 import pytest
 
@@ -67,7 +69,7 @@ def test_没向量的文件会补上(tmp_path, monkeypatch):
 
     assert index.ensure_embeddings(db) == 1
     # 补完之后，语义检索和聚类就得看得见它了
-    assert len(store.list_file_vectors(db)) == 1
+    assert len(store.list_file_vectors(index.MODEL_NAME, db)) == 1
 
 
 # ---------- 情况三：正文变了 → 作废重算 ----------
@@ -78,15 +80,15 @@ def test_正文变了向量作废要重算(tmp_path, monkeypatch):
 
     monkeypatch.setattr(index, "get_model", lambda: _假模型())
     index.ensure_embeddings(db)
-    assert len(store.list_file_vectors(db)) == 1     # 先算好一份
+    assert len(store.list_file_vectors(index.MODEL_NAME, db)) == 1     # 先算好一份
 
     _存一个文件(db, "a.txt", "第二版正文")           # 改了正文，再存一次
 
     # save_file 里那句 CASE WHEN 应该把旧向量清掉，不然检索会拿到过期的向量
-    assert store.list_file_vectors(db) == []
+    assert store.list_file_vectors(index.MODEL_NAME, db) == []
 
     assert index.ensure_embeddings(db) == 1          # 于是被重算
-    assert len(store.list_file_vectors(db)) == 1
+    assert len(store.list_file_vectors(index.MODEL_NAME, db)) == 1
 
 
 def test_正文没变就不会重算(tmp_path, monkeypatch):
@@ -136,8 +138,8 @@ def test_导入并建索引(tmp_path, monkeypatch):
     n = index.import_and_index(str(src), db)
 
     assert n == 2
-    assert len(store.list_file_vectors(db)) == 2     # 文档向量（聚类用），导入完立刻就能用上
-    assert len(store.list_chunk_vectors(db)) == 2    # 段落向量（检索用）也一样
+    assert len(store.list_file_vectors(index.MODEL_NAME, db)) == 2     # 文档向量（聚类用），导入完立刻就能用上
+    assert len(store.list_chunk_vectors(index.MODEL_NAME, db)) == 2    # 段落向量（检索用）也一样
 
 
 # ---------- 段落级向量：ensure_chunk_embeddings ----------
@@ -150,7 +152,7 @@ def test_切段并算好段落向量(tmp_path, monkeypatch):
 
     assert index.ensure_chunk_embeddings(db) == (1, 2)   # 切了 1 篇，算了 2 段
     # 段号从 1 开始，而且顺序就是原文顺序
-    assert [r[2] for r in store.list_chunk_vectors(db)] == [1, 2]
+    assert [r[2] for r in store.list_chunk_vectors(index.MODEL_NAME, db)] == [1, 2]
 
 
 def test_切过的文件不会重复切(tmp_path, monkeypatch):
@@ -172,16 +174,16 @@ def test_正文变了段落会重切(tmp_path, monkeypatch):
 
     monkeypatch.setattr(index, "get_model", lambda: _假模型())
     index.ensure_chunk_embeddings(db)
-    assert len(store.list_chunk_vectors(db)) == 2
+    assert len(store.list_chunk_vectors(index.MODEL_NAME, db)) == 2
 
     _存一个文件(db, "a.txt", "改成只有一段了。")      # 正文改了
 
     # save_file 应该已经把按旧正文切出来的段落整批删掉了
-    assert store.list_chunk_vectors(db) == []
+    assert store.list_chunk_vectors(index.MODEL_NAME, db) == []
 
     # 重新切、重新算：新正文只有一个自然段
     assert index.ensure_chunk_embeddings(db) == (1, 1)
-    assert [r[3] for r in store.list_chunk_vectors(db)] == ["改成只有一段了。"]
+    assert [r[3] for r in store.list_chunk_vectors(index.MODEL_NAME, db)] == ["改成只有一段了。"]
 
 
 def test_换了模型段落向量全部重算(tmp_path, monkeypatch):
@@ -204,4 +206,40 @@ def test_正文是空的文件不切段(tmp_path, monkeypatch):
     monkeypatch.setattr(index, "get_model", lambda: _假模型())
 
     assert index.ensure_chunk_embeddings(db) == (0, 0)    # 没内容可切，也不算向量
-    assert store.list_chunk_vectors(db) == []
+    assert store.list_chunk_vectors(index.MODEL_NAME, db) == []
+
+
+# ---------- 情况五：库里混着两种模型的向量（重算到一半被打断）----------
+
+def test_读向量时只认当前模型(tmp_path, monkeypatch):
+    """换模型要把全库重算一遍，几十秒的事——用户等不及 Ctrl-C 就中断了。
+    这时库里会混着两种模型算的向量。读的时候必须按模型过滤：两种模型的向量
+    维度不一样（旧 768 / 新 512），拼到一起算余弦会直接崩
+    ValueError: Incompatible dimension for X and Y matrices。
+    """
+    db = _建库(tmp_path)
+    _存一个文件(db, "a.txt", "第一段。\n\n第二段。")
+    _存一个文件(db, "b.txt", "正文B")
+
+    monkeypatch.setattr(index, "get_model", lambda: _假模型())
+    index.ensure_embeddings(db)            # a、b 的文档向量：算的是「当前模型」
+    index.ensure_chunk_embeddings(db)      # a、b 的段落向量：同上
+
+    # 手工把 b 的向量改成「旧模型算的」，模拟重算轮到 b 之前被打断
+    conn = sqlite3.connect(db)
+    conn.execute("UPDATE files SET embedding_model = '旧模型' WHERE title = 'b.txt'")
+    conn.execute(
+        "UPDATE chunks SET embedding_model = '旧模型'"
+        " WHERE file_id = (SELECT id FROM files WHERE title = 'b.txt')"
+    )
+    conn.commit()
+    conn.close()
+
+    # 问「当前模型」→ 只看得见 a。b 的向量还躺在库里，但模型对不上，绝不能读出来。
+    # （段落那边用集合：a.txt 有两个自然段，本来就是两行。）
+    assert [r[1] for r in store.list_file_vectors(index.MODEL_NAME, db)] == ["a.txt"]
+    assert {r[1] for r in store.list_chunk_vectors(index.MODEL_NAME, db)} == {"a.txt"}
+
+    # 反过来问「旧模型」→ 只看得见 b。过滤是双向的，不是「只排除掉旧的」
+    assert [r[1] for r in store.list_file_vectors("旧模型", db)] == ["b.txt"]
+    assert {r[1] for r in store.list_chunk_vectors("旧模型", db)} == {"b.txt"}

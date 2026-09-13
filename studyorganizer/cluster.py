@@ -3,7 +3,9 @@
 用层次聚类（AgglomerativeClustering），把语义相近的文件归到同一堆。
 这是"整理方案"的基础：同一堆的文件，将来建议放到一起。
 
-向量不用现算——直接从库里读 index 模块存好的那些，所以这里不需要模型。
+向量不用现算——直接从库里读 index 模块存好的那些，所以这里**不需要向量模型本身**。
+但要知道**当前用的是哪个模型**：库里可能残留别的模型算的向量（换模型重算到一半
+被打断），那些维度不一样，混进来聚类会直接崩。所以 cluster_files 收一个 model_name。
 """
 
 import numpy as np
@@ -11,13 +13,14 @@ from sklearn.cluster import AgglomerativeClustering
 from studyorganizer import store
 
 
-def cluster_files(threshold=0.3):
+def cluster_files(model_name, threshold=0.3):
     """
     把数据库里的文件按内容相似度聚成若干组。
+    参数 model_name：只读这个模型算出来的向量（见上面模块说明）。
     参数 threshold：距离阈值，越大合并越狠、堆越少（余弦距离 0~1）。
     返回 {堆号: [标题列表], ...}
     """
-    rows = store.list_file_vectors()
+    rows = store.list_file_vectors(model_name)
     if not rows:
         return {}                           # 库是空的（或还没建索引）就直接返回
 

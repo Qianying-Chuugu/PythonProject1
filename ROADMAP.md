@@ -41,9 +41,11 @@
 - [x] **换区分度更强的中文模型**。已换成 `BAAI/bge-small-zh-v1.5`（实测见 DESIGN.md）：
       同样卡 0.45，放行率从 74% 降到 31%、间距翻倍到三倍，而且体积小 4 倍、编码快 4 倍。
       换模型没写任何迁移代码——`embedding_model` 对不上就自动全部重算，上一阶段铺的路用上了
-- [ ] 让向量读函数也核对 `embedding_model`（现在只查 `embedding IS NOT NULL`）：
-      换模型重算到一半被打断的话，库里会混着两种维度的向量，检索会崩一个对新手不友好的
-      `ValueError` 维度不匹配（下次启动会自愈，但报错难看）。见 DESIGN.md「一个已知的隐患」
+- [x] 向量读函数也核对 `embedding_model`：`list_file_vectors(model_name)` /
+      `list_chunk_vectors(model_name)` 只返回当前模型算的向量，名字从
+      `search` / `plan → cluster` 一路透传。换模型重算到一半被打断时，
+      原先会崩 `ValueError: Incompatible dimension`（768 混 512），
+      现在只是暂时读不到，补跑一次 `ensure_*` 就恢复（实测验证过）。见 DESIGN.md
 - [ ] **改成相对阈值**：`min_score` 是绝对分数线，实测分不干净——相关段落最低 0.566、
       不相关段落最高 0.653，两个区间重叠，没有一个数能同时满足。可改成
       「只留明显高于全库平均的那些段」

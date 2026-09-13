@@ -7,12 +7,13 @@ from studyorganizer import store
 from studyorganizer.cluster import cluster_files
 
 
-def generate_plan():
+def generate_plan(model_name):
     """生成整理方案：把聚类出来的每一堆，翻译成一条"归并建议"。
 
+    参数 model_name：当前向量模型名，传给聚类用（见 cluster 模块说明）。
     返回 [(id, action, files, reason, status), ...]
     """
-    groups = cluster_files()          # {堆号: [标题列表]}
+    groups = cluster_files(model_name)   # {堆号: [标题列表]}
     store.clear_plan_items()          # 先清掉旧的，避免重复
 
     for titles in groups.values():

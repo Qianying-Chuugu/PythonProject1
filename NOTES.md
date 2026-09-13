@@ -240,3 +240,42 @@ return [(fid, text) for fid, text in rows if text and text.strip()]
   挑一条分不出高低的查询，量出来的数字没有意义。
 
 **相关代码**：无（这是评测方法上的坑）。结论记在 DESIGN.md 的模型对照表里。
+
+## 9. 「版本对不上要作废」这个判断，写的时候查了，读的时候也得查
+
+**遇到的问题**
+- 换向量模型时，库里存着旧模型（768 维）和新模型（512 维）两种向量。
+  正常路径没事，但**重算几十秒，用户等不及 Ctrl-C 中断**，库里就真会两种并存。
+- 这时检索直接崩：
+  `ValueError: Incompatible dimension for X and Y matrices: X.shape[1] == 512 while Y.shape[1] == 768`
+- 讽刺的是这个坑**是我自己上一阶段埋的**：`embedding_model` 那一列就是为「判断过期」
+  加的，但只在**写**的路径上用（`list_*_needing_embedding` 查它决定要不要重算），
+  **读**的路径完全没查——`list_file_vectors` / `list_chunk_vectors` 只看了
+  `embedding IS NOT NULL`。
+
+**根本原因**
+- 我把 `embedding_model` 理解成"一面用来触发重算的旗子"，而它其实是
+  **"这行数据属于哪个版本"的标签**。旗子只在写的时候有人看；标签是**谁碰这行数据
+  都得先核对**的。
+- 换个说法：`embedding IS NOT NULL` 只回答了"这行有数据吗"，没回答
+  "这行数据**跟当前模型配得上**吗"。这两个问题不一样，我只检查了前一个。
+
+**解决方法**
+- 两个读函数都加上 `AND embedding_model IS ?`，并且 `model_name` 定为**必填参数**
+  （不是默认 `None`）。必填很关键：默认 `None` 的话，忘了传就会悄悄退化成
+  "不过滤"，而这正是要修的那个 bug。必填会当场报错。
+- 顺带明确了调用链：`search → store`、`plan → cluster → store`，
+  由 `app.py` 传 `search.MODEL_NAME`。
+- 效果：半成品状态从「崩溃」变成「暂时读不到」（检索返回空），补跑一次 `ensure_*`
+  就恢复。
+
+**核心道理**
+- **凡是"这行数据/这段缓存属于哪个版本"的标记，读的时候必须核对，不能只在写的时候用。**
+  缓存、模型、格式版本、协议版本，全是同一类问题。
+- 判断"能用吗"通常要两个条件：**存在吗** + **对得上吗**。只查存在性是最容易犯的错
+  ——它在正常数据上永远成立，所以测试全绿，问题只在异常状态才冒出来。
+  写这类查询时，习惯性地问一句：**"这里要不要再加一个版本/来源的条件？"**
+- 参数该默认 `None` 还是必填，看"忘了传会发生什么"：忘了传等于**关闭检查** → 必填。
+
+**相关代码**：`studyorganizer/store.py` 的 `list_file_vectors()` /
+`list_chunk_vectors()`、`studyorganizer/cluster.py` 的 `cluster_files()`
